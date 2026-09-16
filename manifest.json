@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.javihuh.schedule",
+  "name": "Recurring Schedule",
+  "version": "0.2.0",
+  "author": "javihuh",
+  "license": "MIT",
+  "description": "Import recurring schedules from CSV, see upcoming activities, and receive class reminders.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Recurring Schedule",
+    "description": "CSV schedule importer with recurrence and five-minute class reminders",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
