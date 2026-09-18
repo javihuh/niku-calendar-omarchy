@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "I18n.js" as I18n
 
 BarWidget {
   id: root
@@ -10,6 +11,10 @@ BarWidget {
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool configured: panelLoader.item ? panelLoader.item.configured === true : false
   readonly property int todayCount: panelLoader.item ? panelLoader.item.todayCount : 0
+  readonly property string languageCode: I18n.languageCode(setting("language", "English"))
+  readonly property string scheduleTitle: panelLoader.item
+    ? String(panelLoader.item.scheduleTitle || "Schedule")
+    : "Schedule"
   readonly property bool popoutSwitchClosing: panelLoader.item
     ? panelLoader.item.popoutSwitchClosing === true
     : false
@@ -84,10 +89,10 @@ BarWidget {
     active: root.opened
     dimmed: !root.configured
     tooltipText: !root.configured
-      ? "Recurring Schedule - import a CSV"
-      : (root.todayCount === 1
-          ? "Recurring Schedule - 1 activity today"
-          : "Recurring Schedule - " + root.todayCount + " activities today")
+      ? I18n.t(root.languageCode, "bar.empty", { title: root.scheduleTitle })
+      : I18n.plural(root.languageCode, "bar.today", root.todayCount, {
+          title: root.scheduleTitle
+        })
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.MiddleButton) root.refresh()
       else root.togglePanel()

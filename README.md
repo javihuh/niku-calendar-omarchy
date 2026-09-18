@@ -1,18 +1,23 @@
 # Recurring Schedule for Omarchy
 
-An independent Omarchy bar plugin that imports a CSV schedule, validates it
-before saving, and expands one-time, weekly, biweekly, and monthly activities.
+An independent Omarchy bar plugin for creating and editing recurring activities,
+opening class notes and links, importing CSV schedules, and receiving reminders.
 It does not replace or modify the built-in clock or other calendar widgets.
 
-![Recurring Schedule panel with an active class](preview.png)
+![Editable Recurring Schedule panel](preview.png)
 
 ## Features
 
 - Native Omarchy bar widget and themed popup.
+- Complete English interface by default with optional Spanish localization.
+- Editable schedule title that persists independently of its activities.
+- Create, inspect, edit, and delete activities directly from the bar.
+- Per-activity plain-text notes and multiple labeled HTTP(S) links, with an
+  option to copy the links to every activity sharing the same title.
 - Yazi file picker in an external terminal plus manual path input.
 - Preview and row-level validation before an import is saved.
 - One-time, weekly, biweekly, and monthly recurrence.
-- Automatic accent highlight and `EN CLASE` label for the current activity.
+- Automatic accent highlight and `IN PROGRESS` label for the current activity.
 - Native Omarchy notification five minutes before every activity.
 - Comma, semicolon, and tab delimiter detection.
 - Spanish and English column aliases.
@@ -25,7 +30,7 @@ It does not replace or modify the built-in clock or other calendar widgets.
 - Python 3; the helper uses only the standard library.
 - `yazi` and `xdg-terminal-exec` for the optional terminal file picker. A CSV
   path can still be entered manually when either command is unavailable.
-- The built-in Omarchy notification service for five-minute class reminders.
+- The built-in Omarchy notification service for five-minute activity reminders.
 
 The plugin requires no elevated privileges, package manager, background daemon,
 or network access.
@@ -90,36 +95,80 @@ contain that date. Use `ultimo` to run an activity on every month's final day.
 ## Usage
 
 1. Click the calendar icon in the Omarchy bar.
-2. Select a `.csv` file or enter its path.
-3. Choose **Previsualizar CSV**.
-4. Correct any reported row errors.
-5. Choose **Importar horario**.
+2. Choose **Add activity** to create an activity manually.
+3. Use **Manage activities** to inspect, edit, or delete complete recurring series.
+4. Select an upcoming activity to open its notes, links, and editing actions.
+5. Use the pencil beside the heading to rename the schedule.
 
-Importing another CSV replaces the prior schedule atomically, so repeated
-imports never create duplicate activities.
+The editor accepts dates as `YYYY-MM-DD` and times as 24-hour `HH:MM` values.
+Weekly and biweekly activities use a weekday; monthly activities can use a day
+from `1` through `31` or the final day of each month.
 
-The plugin checks for upcoming classes every 30 seconds while the Omarchy shell
-is running. A native notification containing the class name, time, and location
-is sent during the five-minute window before the class starts. Notifications
+The editor always offers to save the link list only for the current day and
+time or apply it to all activities with the same title. If no other day or time
+has that title, both choices affect the same recurring series. Title matching
+ignores capitalization. Applying to every match copies the links rather than
+permanently synchronizing them, so one activity can later use a different URL.
+
+### Language
+
+The interface, validation messages, file picker, and reminders use English by
+default. Switch the widget to Spanish with:
+
+```bash
+omarchy bar set io.github.javihuh.schedule language Español
+```
+
+Switch back with:
+
+```bash
+omarchy bar set io.github.javihuh.schedule language English
+```
+
+The setting applies live. Activity titles, notes, locations, link labels, and
+other user-authored content are shown exactly as entered and are never
+translated automatically.
+
+### Importing CSV
+
+1. Select a `.csv` file or enter its path in the import section.
+2. Choose **Preview CSV**.
+3. Correct any reported row errors.
+4. Choose **Import and replace activities**.
+
+The local plugin state is authoritative after an import. Editing an activity
+never modifies the source CSV. Importing another CSV atomically replaces all
+activities, including manually added notes and links, while preserving the
+custom schedule title. The panel displays this warning before import.
+
+The plugin checks for upcoming activities every 30 seconds while the Omarchy
+shell is running. A native notification containing the activity name, time, and
+location is sent during the five-minute window before it starts. Notifications
 use normal urgency and respect Do Not Disturb.
 
 ## Local Data
 
-The imported normalized schedule is stored at:
+The normalized editable schedule is stored at:
 
 ```text
 ~/.local/state/omarchy/recurring-schedule/schedule.json
 ```
 
 The source CSV is never modified. The stored schedule is created with user-only
-permissions (`0600`).
+permissions (`0600`) and protected by atomic writes and a revision check so
+simultaneous panels cannot silently overwrite each other.
+
+Version `0.3.0` migrates existing version 1 data automatically. Before the first
+migration it preserves the original payload as `schedule.json.v1.bak` in the
+same state directory.
 
 Sent reminder occurrences are tracked in
 `~/.local/state/omarchy/recurring-schedule/reminders.json` so shell reloads and
 multiple monitors do not create duplicate notifications.
 
-No schedule content is transmitted over the network. The plugin only reads the
-CSV selected by the user and writes its normalized local state.
+No schedule content is transmitted by the plugin. It only reads a selected CSV
+and writes normalized local state. Saved links are validated as HTTP(S) URLs
+and open in the default browser only after an explicit click.
 
 ## Remove
 
@@ -144,7 +193,8 @@ Validate the manifest and run the tests:
 
 ```bash
 omarchy plugin validate .
-qmllint -I /usr/share/omarchy/shell BarWidget.qml Panel.qml
+qmllint -I /usr/share/omarchy/shell *.qml
+qmltestrunner -input tests
 python3 -m unittest discover -s tests -v
 ```
 
@@ -156,6 +206,17 @@ python3 schedule.py import examples/horario.csv
 python3 schedule.py status
 python3 schedule.py remind
 ```
+
+Backend messages default to English. Pass `--language es` before the command
+to exercise Spanish output, for example:
+
+```bash
+python3 schedule.py --language es preview examples/horario.csv
+```
+
+Mutation commands (`rename-schedule`, `create-activity`, `update-activity`, and
+`delete-activity`) accept one JSON object on standard input. They use the saved
+revision to reject stale edits and are primarily consumed by the QML panel.
 
 Planned import adapters include spreadsheets, iCalendar, PDF, images, and OCR.
 CSV is intentionally the first format because it is deterministic and can be

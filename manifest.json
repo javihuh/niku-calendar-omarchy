@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.javihuh.schedule",
   "name": "Recurring Schedule",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "javihuh",
   "license": "MIT",
-  "description": "Import recurring schedules from CSV, see upcoming activities, and receive class reminders.",
+  "description": "Create and edit recurring activities, attach notes and links, import CSV schedules, and receive reminders.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,9 +14,25 @@
   },
   "barWidget": {
     "displayName": "Recurring Schedule",
-    "description": "CSV schedule importer with recurrence and five-minute class reminders",
+    "description": "Editable recurring schedule with notes, links, CSV import, and reminders",
     "category": "Productivity",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "language": "English"
+    },
+    "schema": [
+      {
+        "key": "language",
+        "type": "enum",
+        "label": "Language",
+        "options": [
+          "English",
+          "Español"
+        ],
+        "defaultValue": "English",
+        "description": "Language used by the widget, panel, validation messages, file picker, and reminders."
+      }
+    ]
   }
 }

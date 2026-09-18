@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "I18n.js" as I18n
 
 Panel {
   id: root
@@ -17,38 +18,66 @@ Panel {
   readonly property string helperPath: Qt.resolvedUrl("schedule.py").toString().replace(/^file:\/\//, "")
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property string languageCode: I18n.languageCode(setting("language", "English"))
 
   property var scheduleStatus: ({
+    ok: true,
+    revision: 0,
+    title: "Schedule",
     configured: false,
+    items: [],
     itemCount: 0,
     todayCount: 0,
     events: []
   })
   readonly property bool configured: scheduleStatus.configured === true
   readonly property int todayCount: Number(scheduleStatus.todayCount || 0)
-  readonly property var upcomingEvents: scheduleStatus.events || []
-  readonly property var visibleEvents: root.first(root.upcomingEvents, 8)
+  readonly property string scheduleTitle: String(scheduleStatus.title || "Schedule")
 
-  property string csvPath: ""
+  property string viewMode: "main"
+  property string selectedActivityId: ""
+  property string detailReturnMode: "main"
+  property string editorCancelMode: "main"
+  property int editorRevision: 0
+
   property var previewData: null
-  readonly property var previewItems: previewData && previewData.items ? previewData.items : []
-  readonly property var previewErrors: previewData && previewData.errors ? previewData.errors : []
-  readonly property var previewWarnings: previewData && previewData.warnings ? previewData.warnings : []
-  readonly property bool previewReady: previewData && previewData.ok === true
-
   property string notice: ""
   property bool noticeIsError: false
   property bool refreshQueued: false
   property bool reminderQueued: false
+  property bool componentReady: false
+  property int languageRevision: 0
+  property bool repreviewAfterLanguageChange: false
+  property bool editorNeedsRevisionSync: false
+  property bool editorConflictRefreshPending: false
+  property int statusGeneration: 0
+  property int editorRevisionSyncGeneration: 0
+
+  property string mutationKind: ""
+  property string mutationTargetId: ""
+  property string mutationReturnMode: "main"
+  property var createBaselineIds: []
 
   readonly property bool choosing: chooserProc.running
   readonly property bool previewing: previewProc.running
   readonly property bool importing: importProc.running
-  readonly property bool busy: choosing || previewing || importing
+  readonly property bool mutating: mutationProc.running
+  readonly property bool busy: choosing || previewing || importing || mutating
+  readonly property var selectedActivity: activityById(selectedActivityId)
 
-  function first(values, count) {
-    if (!values || !values.length) return []
-    return values.slice(0, Math.min(values.length, count))
+  onLanguageCodeChanged: {
+    if (!componentReady) return
+    var hadPreview = previewData !== null || previewProc.running
+    languageRevision += 1
+    clearNotice()
+    previewData = null
+    if (reminderProc.running) reminderQueued = true
+    if (hadPreview && !importProc.running && !mutationProc.running
+        && !chooserProc.running) {
+      repreviewAfterLanguageChange = true
+      Qt.callLater(rerunPreviewForLanguage)
+    }
+    if (opened) Qt.callLater(refresh)
   }
 
   function parsedOutput(text) {
@@ -64,110 +93,394 @@ Panel {
   function errorText(data, fallback) {
     if (data && data.errors && data.errors.length > 0) {
       var issue = data.errors[0]
-      var prefix = Number(issue.row || 0) > 0 ? "Fila " + issue.row + ": " : ""
+      var prefix = Number(issue.row || 0) > 0
+        ? I18n.t(languageCode, "row.prefix", { row: issue.row }) : ""
       return prefix + String(issue.message || fallback)
     }
     return fallback
   }
 
-  function localPath(url) {
-    var value = String(url || "")
-    if (value.indexOf("file://") === 0)
-      return decodeURIComponent(value.replace(/^file:\/\//, ""))
-    return value
+  function isRevisionConflict(data, message) {
+    var errors = data && data.errors ? data.errors : []
+    if (errors.length > 0 && String(errors[0].code || "") === "revision_conflict")
+      return true
+    return String(message || "").indexOf("Revision conflict") !== -1
+      || String(message || "").indexOf("Conflicto de revisión") !== -1
+  }
+
+  function backendCommand(parts) {
+    return ["python3", helperPath, "--language", languageCode].concat(parts)
+  }
+
+  function rerunPreviewForLanguage() {
+    if (!repreviewAfterLanguageChange || previewProc.running) return
+    repreviewAfterLanguageChange = false
+    previewCsv()
+  }
+
+  function currentRevision() {
+    var revision = Number(scheduleStatus.revision || 0)
+    return isFinite(revision) && revision >= 0 ? revision : 0
+  }
+
+  function activityById(activityId) {
+    var items = scheduleStatus.items || []
+    for (var index = 0; index < items.length; index++) {
+      if (String(items[index].id || "") === String(activityId || "")) return items[index]
+    }
+    return null
+  }
+
+  function activityInStatus(data, activityId) {
+    var items = data && data.items ? data.items : []
+    for (var index = 0; index < items.length; index++) {
+      if (String(items[index].id || "") === String(activityId || "")) return items[index]
+    }
+    return null
+  }
+
+  function applyStatus(data) {
+    if (!data || data.ok !== true || !data.items || !data.events) return false
+    var incomingRevision = Number(data.revision || 0)
+    var knownRevision = currentRevision()
+    if (!isFinite(incomingRevision) || incomingRevision < knownRevision) return false
+
+    scheduleStatus = data
+    if (viewMode === "detail" && selectedActivityId !== ""
+        && !activityInStatus(data, selectedActivityId)) {
+      selectedActivityId = ""
+      viewMode = "manage"
+      notice = I18n.t(languageCode, "notice.activityMissing")
+      noticeIsError = true
+      Qt.callLater(focusKeyCatcher)
+    }
+    return true
+  }
+
+  function todayIso() {
+    var date = new Date()
+    var month = String(date.getMonth() + 1).padStart(2, "0")
+    var day = String(date.getDate()).padStart(2, "0")
+    return date.getFullYear() + "-" + month + "-" + day
+  }
+
+  function clearNotice() {
+    notice = ""
+    noticeIsError = false
+  }
+
+  function focusKeyCatcher() {
+    if (root.opened && keyCatcher) keyCatcher.forceActiveFocus()
+  }
+
+  function setView(nextMode) {
+    if (nextMode !== "main") mainView.renameActive = false
+    viewMode = nextMode
+    Qt.callLater(focusKeyCatcher)
+  }
+
+  function showMain() {
+    clearNotice()
+    mainView.renameActive = false
+    setView("main")
+  }
+
+  function showManage() {
+    clearNotice()
+    setView("manage")
+  }
+
+  function openActivity(activityId, returnMode) {
+    if (!activityById(activityId)) return
+    clearNotice()
+    selectedActivityId = String(activityId)
+    detailReturnMode = returnMode === "manage" ? "manage" : "main"
+    setView("detail")
+  }
+
+  function startCreate(returnMode) {
+    if (busy) return
+    clearNotice()
+    editorNeedsRevisionSync = false
+    editorConflictRefreshPending = false
+    editorRevisionSyncGeneration = 0
+    editorRevision = currentRevision()
+    editorCancelMode = returnMode === "manage" ? "manage" : "main"
+    viewMode = "edit"
+    activityEditor.beginCreate(todayIso())
+    Qt.callLater(activityEditor.focusFirst)
+  }
+
+  function startEdit() {
+    if (busy || !selectedActivity) return
+    clearNotice()
+    editorNeedsRevisionSync = false
+    editorConflictRefreshPending = false
+    editorRevisionSyncGeneration = 0
+    editorRevision = currentRevision()
+    editorCancelMode = "detail"
+    viewMode = "edit"
+    activityEditor.beginEdit(selectedActivity)
+    Qt.callLater(activityEditor.focusFirst)
+  }
+
+  function cancelEditor() {
+    if (mutating) return
+    clearNotice()
+    editorNeedsRevisionSync = false
+    editorConflictRefreshPending = false
+    editorRevisionSyncGeneration = 0
+    if (editorCancelMode === "detail" && !selectedActivity)
+      setView("manage")
+    else
+      setView(editorCancelMode)
+  }
+
+  function goBackOrClose() {
+    if (deleteDialog.opened) {
+      cancelDelete()
+      return
+    }
+    if (viewMode === "edit") {
+      cancelEditor()
+    } else if (viewMode === "detail") {
+      setView(detailReturnMode)
+    } else if (viewMode === "manage") {
+      setView("main")
+    } else {
+      close()
+    }
   }
 
   function refresh() {
     if (statusProc.running) {
-      root.refreshQueued = true
+      refreshQueued = true
       return
     }
-    statusProc.command = ["python3", root.helperPath, "status", "--days", "120"]
+    statusGeneration += 1
+    statusProc.requestStatusGeneration = statusGeneration
+    statusProc.requestLanguageRevision = languageRevision
+    statusProc.command = backendCommand(["status", "--days", "120"])
     statusProc.running = true
   }
 
   function checkReminders() {
     if (reminderProc.running) {
-      root.reminderQueued = true
+      reminderQueued = true
       return
     }
-    reminderProc.command = ["python3", root.helperPath, "remind"]
+    reminderProc.requestLanguageRevision = languageRevision
+    reminderProc.command = backendCommand(["remind"])
     reminderProc.running = true
   }
 
   function previewCsv() {
-    var path = String(root.csvPath || "").trim()
+    var path = String(mainView.csvPath || "").trim()
     if (!path) {
-      root.notice = "Selecciona o escribe la ruta de un archivo CSV."
-      root.noticeIsError = true
+      notice = I18n.t(languageCode, "notice.csvPathRequired")
+      noticeIsError = true
       return
     }
-    root.notice = ""
-    root.noticeIsError = false
-    root.previewData = null
-    previewProc.command = ["python3", root.helperPath, "preview", path]
+    clearNotice()
+    previewData = null
+    previewProc.requestLanguageRevision = languageRevision
+    previewProc.command = backendCommand(["preview", path])
     previewProc.running = true
   }
 
   function chooseCsv() {
-    if (root.busy) return
-    root.notice = "Abriendo Yazi para seleccionar el CSV..."
-    root.noticeIsError = false
-    chooserProc.command = ["python3", root.helperPath, "choose"]
-    root.close()
+    if (busy) return
+    notice = I18n.t(languageCode, "notice.openingPicker")
+    noticeIsError = false
+    chooserProc.requestLanguageRevision = languageRevision
+    chooserProc.command = backendCommand(["choose"])
+    close()
     Qt.callLater(function() { chooserProc.running = true })
   }
 
   function importCsv() {
-    if (!root.previewReady || importProc.running) return
-    root.notice = ""
-    root.noticeIsError = false
-    importProc.command = ["python3", root.helperPath, "import", String(root.csvPath).trim()]
+    if (!mainView.previewReady || busy) return
+    clearNotice()
+    importProc.requestLanguageRevision = languageRevision
+    importProc.command = backendCommand([
+      "import", String(mainView.csvPath).trim(),
+      "--expected-revision", String(currentRevision())
+    ])
     importProc.running = true
   }
 
+  function startMutation(kind, commandParts, payload, targetId, returnMode) {
+    if (mutationProc.running || importProc.running) return
+    clearNotice()
+    mutationKind = kind
+    mutationTargetId = String(targetId || "")
+    mutationReturnMode = String(returnMode || "main")
+    mutationProc.requestLanguageRevision = languageRevision
+    mutationProc.payload = JSON.stringify(payload)
+    mutationProc.command = backendCommand(commandParts)
+    mutationProc.running = true
+  }
+
+  function renameSchedule(title) {
+    if (busy) return
+    startMutation("rename", ["rename-schedule"], {
+      expectedRevision: currentRevision(),
+      title: title
+    }, "", "main")
+  }
+
+  function saveEditor(activity, linkScope) {
+    if (busy) return
+    if (editorConflictRefreshPending) return
+    if (editorNeedsRevisionSync) {
+      editorConflictRefreshPending = true
+      editorRevisionSyncGeneration = statusGeneration + 1
+      refresh()
+      return
+    }
+    if (activityEditor.creating) {
+      var items = scheduleStatus.items || []
+      var existingIds = []
+      for (var index = 0; index < items.length; index++)
+        existingIds.push(String(items[index].id || ""))
+      createBaselineIds = existingIds
+      startMutation("create", ["create-activity"], {
+        expectedRevision: editorRevision,
+        activity: activity,
+        linkScope: linkScope || "activity"
+      }, "", editorCancelMode)
+    } else {
+      startMutation("update", ["update-activity", selectedActivityId], {
+        expectedRevision: editorRevision,
+        changes: activity,
+        linkScope: linkScope || "activity"
+      }, selectedActivityId, detailReturnMode)
+    }
+  }
+
+  function requestDelete() {
+    if (busy || !selectedActivity) return
+    deleteDialog.selectedIndex = 0
+    deleteDialog.opened = true
+    Qt.callLater(function() { deleteDialogFocus.forceActiveFocus() })
+  }
+
+  function cancelDelete() {
+    deleteDialog.opened = false
+    Qt.callLater(focusKeyCatcher)
+  }
+
+  function confirmDelete() {
+    if (busy || !selectedActivity) {
+      cancelDelete()
+      return
+    }
+    var activityId = selectedActivityId
+    deleteDialog.opened = false
+    startMutation("delete", ["delete-activity", activityId], {
+      expectedRevision: currentRevision()
+    }, activityId, "manage")
+  }
+
+  function mutationSucceeded(data) {
+    var kind = mutationKind
+    var targetId = mutationTargetId
+    var returnMode = mutationReturnMode
+    editorNeedsRevisionSync = false
+    editorConflictRefreshPending = false
+    editorRevisionSyncGeneration = 0
+    applyStatus(data)
+
+    if (kind === "rename") {
+      notice = I18n.t(languageCode, "notice.renameSaved")
+      noticeIsError = false
+      setView("main")
+    } else if (kind === "create") {
+      var createdId = ""
+      var items = data.items || []
+      for (var index = 0; index < items.length; index++) {
+        var candidateId = String(items[index].id || "")
+        if (createBaselineIds.indexOf(candidateId) === -1) {
+          createdId = candidateId
+          break
+        }
+      }
+      if (!createdId && items.length > 0) createdId = String(items[items.length - 1].id || "")
+      selectedActivityId = createdId
+      detailReturnMode = returnMode === "manage" ? "manage" : "main"
+      var createdLinksUpdatedCount = Number(data.linksUpdatedCount || 0)
+      notice = data.linkScope === "same-title" && createdLinksUpdatedCount > 1
+        ? I18n.t(languageCode, "notice.activityCreatedLinks", {
+            count: createdLinksUpdatedCount
+          })
+        : I18n.t(languageCode, "notice.activityCreated")
+      noticeIsError = false
+      setView("detail")
+    } else if (kind === "update") {
+      selectedActivityId = targetId
+      var linksUpdatedCount = Number(data.linksUpdatedCount || 0)
+      notice = data.linkScope === "same-title" && linksUpdatedCount > 1
+        ? I18n.t(languageCode, "notice.changesSavedLinks", {
+            count: linksUpdatedCount
+          })
+        : I18n.t(languageCode, "notice.changesSaved")
+      noticeIsError = false
+      setView("detail")
+    } else if (kind === "delete") {
+      selectedActivityId = ""
+      notice = I18n.t(languageCode, "notice.activityDeleted")
+      noticeIsError = false
+      setView("manage")
+    }
+    Qt.callLater(checkReminders)
+  }
+
+  function mutationFailed(data, stderrText) {
+    var conflict = isRevisionConflict(data, stderrText)
+    var message = conflict
+      ? I18n.t(languageCode, "notice.revisionConflict")
+      : errorText(data, String(stderrText
+          || I18n.t(languageCode, "notice.saveFailed")))
+    notice = message
+    noticeIsError = true
+    if (conflict) {
+      if (viewMode === "edit") {
+        editorNeedsRevisionSync = true
+        editorConflictRefreshPending = true
+        editorRevisionSyncGeneration = statusGeneration + 1
+      }
+      refresh()
+    }
+  }
+
   function open() {
-    root.refresh()
-    root.controller.show()
+    viewMode = "main"
+    mainView.renameActive = false
+    refresh()
+    controller.show()
   }
 
   function close() {
-    if (pathField.activeFocus) pathField.focus = false
-    root.controller.hide()
+    deleteDialog.opened = false
+    mainView.renameActive = false
+    controller.hide()
   }
 
   function toggle() {
-    if (root.opened) root.close()
-    else root.open()
+    if (opened) close()
+    else open()
   }
 
   function switchPanel(direction) {
-    if (root.bar && typeof root.bar.switchPanelFrom === "function")
-      return root.bar.switchPanelFrom(root.barIdentity, direction)
+    if (bar && typeof bar.switchPanelFrom === "function")
+      return bar.switchPanelFrom(barIdentity, direction)
     return false
   }
 
-  function eventDateLabel(isoDate) {
-    var parts = String(isoDate || "").split("-")
-    if (parts.length !== 3) return String(isoDate || "")
-    var value = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0)
-    var weekdays = ["dom", "lun", "mar", "mie", "jue", "vie", "sab"]
-    var months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
-    return weekdays[value.getDay()] + " " + value.getDate() + " " + months[value.getMonth()]
-  }
-
-  function recurrenceLabel(item) {
-    var recurrence = String(item.recurrence || "")
-    if (recurrence === "once") return "una vez"
-    if (recurrence === "weekly") return "semanal"
-    if (recurrence === "biweekly") return "quincenal"
-    if (recurrence === "monthly") return "mensual"
-    return recurrence
-  }
-
   Component.onCompleted: Qt.callLater(function() {
-    root.refresh()
-    root.checkReminders()
+    componentReady = true
+    refresh()
+    checkReminders()
   })
 
   Timer {
@@ -182,6 +495,8 @@ Panel {
 
   Process {
     id: statusProc
+    property int requestLanguageRevision: 0
+    property int requestStatusGeneration: 0
     stdout: StdioCollector {
       id: statusOut
       waitForEnd: true
@@ -192,12 +507,39 @@ Panel {
     }
     onExited: function(exitCode) {
       var data = root.parsedOutput(statusOut.text)
+      var staleLanguage = requestLanguageRevision !== root.languageRevision
       if (exitCode === 0 && data && data.ok === true) {
-        root.scheduleStatus = data
+        root.applyStatus(data)
+        if (root.editorNeedsRevisionSync
+            && requestStatusGeneration >= root.editorRevisionSyncGeneration) {
+          root.editorConflictRefreshPending = false
+          if (root.viewMode !== "edit") {
+            root.editorNeedsRevisionSync = false
+            root.editorRevisionSyncGeneration = 0
+          } else if (activityEditor.creating
+              || root.activityById(root.selectedActivityId)) {
+            root.editorRevision = root.currentRevision()
+            root.editorNeedsRevisionSync = false
+            root.editorRevisionSyncGeneration = 0
+          } else {
+            root.editorNeedsRevisionSync = false
+            root.editorRevisionSyncGeneration = 0
+            root.selectedActivityId = ""
+            root.setView("manage")
+            root.notice = I18n.t(root.languageCode, "notice.activityMissing")
+            root.noticeIsError = true
+          }
+        }
       } else if (!root.notice) {
-        root.notice = root.errorText(data, String(statusErr.text || "No se pudo leer el horario."))
+        root.notice = staleLanguage
+          ? I18n.t(root.languageCode, "notice.readFailed")
+          : root.errorText(data, String(statusErr.text
+              || I18n.t(root.languageCode, "notice.readFailed")))
         root.noticeIsError = true
       }
+      if (exitCode !== 0 && root.editorNeedsRevisionSync
+          && requestStatusGeneration >= root.editorRevisionSyncGeneration)
+        root.editorConflictRefreshPending = false
       if (root.refreshQueued) {
         root.refreshQueued = false
         Qt.callLater(root.refresh)
@@ -207,6 +549,7 @@ Panel {
 
   Process {
     id: reminderProc
+    property int requestLanguageRevision: 0
     stdout: StdioCollector {
       id: reminderOut
       waitForEnd: true
@@ -216,10 +559,11 @@ Panel {
       waitForEnd: true
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0) {
+      if (exitCode !== 0 && requestLanguageRevision === root.languageRevision) {
         var data = root.parsedOutput(reminderOut.text)
         console.warn("schedule reminders: "
-          + root.errorText(data, String(reminderErr.text || "notification check failed")))
+          + root.errorText(data, String(reminderErr.text
+            || I18n.t(root.languageCode, "notice.reminderFailed"))))
       }
       if (root.reminderQueued) {
         root.reminderQueued = false
@@ -230,6 +574,7 @@ Panel {
 
   Process {
     id: chooserProc
+    property int requestLanguageRevision: 0
     stdout: StdioCollector {
       id: chooserOut
       waitForEnd: true
@@ -240,18 +585,20 @@ Panel {
     }
     onExited: function(exitCode) {
       var data = root.parsedOutput(chooserOut.text)
+      var staleLanguage = requestLanguageRevision !== root.languageRevision
       root.open()
       if (exitCode === 0 && data && data.ok === true && data.path) {
-        root.csvPath = String(data.path)
-        pathField.text = root.csvPath
-        root.notice = ""
-        root.noticeIsError = false
+        mainView.csvPath = String(data.path)
+        root.clearNotice()
         Qt.callLater(root.previewCsv)
       } else if (data && data.cancelled === true) {
-        root.notice = "Selección cancelada."
+        root.notice = I18n.t(root.languageCode, "notice.selectionCancelled")
         root.noticeIsError = false
       } else {
-        root.notice = root.errorText(data, String(chooserErr.text || "No se pudo abrir el selector de archivos."))
+        root.notice = staleLanguage
+          ? I18n.t(root.languageCode, "notice.pickerFailed")
+          : root.errorText(data, String(chooserErr.text
+              || I18n.t(root.languageCode, "notice.pickerFailed")))
         root.noticeIsError = true
       }
     }
@@ -259,6 +606,7 @@ Panel {
 
   Process {
     id: previewProc
+    property int requestLanguageRevision: 0
     stdout: StdioCollector {
       id: previewOut
       waitForEnd: true
@@ -268,13 +616,20 @@ Panel {
       waitForEnd: true
     }
     onExited: function(exitCode) {
+      if (requestLanguageRevision !== root.languageRevision) {
+        root.repreviewAfterLanguageChange = true
+        Qt.callLater(root.rerunPreviewForLanguage)
+        return
+      }
       var data = root.parsedOutput(previewOut.text)
       root.previewData = data
       if (exitCode === 0 && data && data.ok === true) {
-        root.notice = data.validCount + (data.validCount === 1 ? " actividad lista para importar." : " actividades listas para importar.")
+        root.notice = I18n.plural(root.languageCode, "count.ready",
+          Number(data.validCount || 0))
         root.noticeIsError = false
       } else {
-        root.notice = root.errorText(data, String(previewErr.text || "No se pudo validar el CSV."))
+        root.notice = root.errorText(data, String(previewErr.text
+          || I18n.t(root.languageCode, "notice.previewFailed")))
         root.noticeIsError = true
       }
     }
@@ -282,6 +637,7 @@ Panel {
 
   Process {
     id: importProc
+    property int requestLanguageRevision: 0
     stdout: StdioCollector {
       id: importOut
       waitForEnd: true
@@ -292,16 +648,49 @@ Panel {
     }
     onExited: function(exitCode) {
       var data = root.parsedOutput(importOut.text)
+      var staleLanguage = requestLanguageRevision !== root.languageRevision
       if (exitCode === 0 && data && data.ok === true) {
-        root.scheduleStatus = data
+        root.applyStatus(data)
         root.previewData = null
-        root.notice = data.importedCount + (data.importedCount === 1 ? " actividad importada." : " actividades importadas.")
+        root.notice = I18n.plural(root.languageCode, "count.imported",
+          Number(data.importedCount || 0))
         root.noticeIsError = false
         Qt.callLater(root.checkReminders)
       } else {
-        root.notice = root.errorText(data, String(importErr.text || "No se pudo importar el CSV."))
+        var message = staleLanguage
+          ? I18n.t(root.languageCode, "notice.importFailed")
+          : root.errorText(data, String(importErr.text
+              || I18n.t(root.languageCode, "notice.importFailed")))
+        root.notice = message
         root.noticeIsError = true
+        if (root.isRevisionConflict(data, message)) root.refresh()
       }
+    }
+  }
+
+  Process {
+    id: mutationProc
+    property string payload: ""
+    property int requestLanguageRevision: 0
+    stdinEnabled: true
+    stdout: StdioCollector {
+      id: mutationOut
+      waitForEnd: true
+    }
+    stderr: StdioCollector {
+      id: mutationErr
+      waitForEnd: true
+    }
+    onStarted: write(payload + "\n")
+    onExited: function(exitCode) {
+      var data = root.parsedOutput(mutationOut.text)
+      if (exitCode === 0 && data && data.ok === true)
+        root.mutationSucceeded(data)
+      else if (requestLanguageRevision !== root.languageRevision
+          && !root.isRevisionConflict(data, ""))
+        root.mutationFailed(null, I18n.t(root.languageCode, "notice.saveFailed"))
+      else
+        root.mutationFailed(data, mutationErr.text)
     }
   }
 
@@ -313,369 +702,129 @@ Panel {
     open: root.opened
     centerOnBar: false
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(500))
-    contentHeight: panel.fittedContentHeight(Style.space(620))
+    contentWidth: panel.fittedContentWidth(Style.space(540))
+    contentHeight: panel.fittedContentHeight(Style.space(680))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: pathField.activeFocus
-      onCloseRequested: root.close()
+      blocked: deleteDialog.opened
+        || (root.viewMode === "main" && mainView.inputActive)
+        || (root.viewMode === "edit" && activityEditor.inputActive)
+      onCloseRequested: root.goBackOrClose()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      onMoveRequested: function(dx, dy) {
+        if (root.viewMode === "manage") activityManager.moveSelection(dy !== 0 ? dy : dx)
+      }
       onActivateRequested: {
-        if (!root.busy && String(root.csvPath).trim()) root.previewCsv()
+        if (root.viewMode === "manage") activityManager.activateSelection()
       }
 
-      Flickable {
-        id: scroll
+      ScheduleMain {
+        id: mainView
         anchors.fill: parent
-        contentWidth: width
-        contentHeight: content.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        interactive: contentHeight > height
+        visible: root.viewMode === "main"
+        scheduleStatus: root.scheduleStatus
+        languageCode: root.languageCode
+        previewData: root.previewData
+        notice: root.notice
+        noticeIsError: root.noticeIsError
+        choosing: root.choosing
+        previewing: root.previewing
+        importing: root.importing
+        busy: root.busy
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        onRenameRequested: function(title) { root.renameSchedule(title) }
+        onAddRequested: root.startCreate("main")
+        onManageRequested: root.showManage()
+        onActivityRequested: function(activityId) { root.openActivity(activityId, "main") }
+        onChooseRequested: root.chooseCsv()
+        onPreviewRequested: root.previewCsv()
+        onImportRequested: root.importCsv()
+        onPathEdited: {
+          root.previewData = null
+          root.clearNotice()
+        }
+        onFocusReleaseRequested: Qt.callLater(root.focusKeyCatcher)
+      }
 
-        Column {
-          id: content
-          width: scroll.width
-          spacing: Style.space(12)
+      ActivityManager {
+        id: activityManager
+        anchors.fill: parent
+        visible: root.viewMode === "manage"
+        items: root.scheduleStatus.items || []
+        languageCode: root.languageCode
+        scheduleTitle: root.scheduleTitle
+        notice: root.notice
+        noticeIsError: root.noticeIsError
+        busy: root.busy
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        onBackRequested: root.showMain()
+        onAddRequested: root.startCreate("manage")
+        onActivityRequested: function(activityId) { root.openActivity(activityId, "manage") }
+      }
 
-          Item {
-            width: parent.width
-            implicitHeight: Math.max(heroIcon.implicitHeight, heroText.implicitHeight, heroCount.implicitHeight)
+      ActivityDetails {
+        id: activityDetails
+        anchors.fill: parent
+        visible: root.viewMode === "detail"
+        activity: root.selectedActivity || ({})
+        languageCode: root.languageCode
+        notice: root.notice
+        noticeIsError: root.noticeIsError
+        busy: root.busy
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        onBackRequested: root.setView(root.detailReturnMode)
+        onEditRequested: root.startEdit()
+        onDeleteRequested: root.requestDelete()
+      }
 
-            Text {
-              id: heroIcon
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              text: "\uf073"
-              color: root.contentForeground
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.displayLarge
-            }
+      ActivityEditor {
+        id: activityEditor
+        anchors.fill: parent
+        visible: root.viewMode === "edit"
+        notice: root.notice
+        noticeIsError: root.noticeIsError
+        busy: root.busy || root.editorConflictRefreshPending
+        activities: root.scheduleStatus.items || []
+        languageCode: root.languageCode
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        onSaveRequested: function(activity, linkScope) {
+          root.saveEditor(activity, linkScope)
+        }
+        onCancelRequested: root.cancelEditor()
+        onFocusReleaseRequested: Qt.callLater(root.focusKeyCatcher)
+      }
 
-            Column {
-              id: heroText
-              anchors.left: heroIcon.right
-              anchors.leftMargin: Style.space(14)
-              anchors.right: heroCount.left
-              anchors.rightMargin: Style.space(10)
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(2)
+      ConfirmDialog {
+        id: deleteDialog
+        anchors.fill: parent
+        z: 20
+        opened: false
+        selectedIndex: 0
+        message: root.selectedActivity
+          ? I18n.t(root.languageCode, "dialog.deleteTitle", {
+              title: String(root.selectedActivity.title || "")
+            })
+          : I18n.t(root.languageCode, "dialog.deleteFallback")
+        cancelText: I18n.t(root.languageCode, "common.cancel")
+        confirmText: I18n.t(root.languageCode, "common.delete")
+        background: Color.popups.background
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        onCanceled: root.cancelDelete()
+        onConfirmed: root.confirmDelete()
 
-              Text {
-                width: parent.width
-                text: "Horario recurrente"
-                elide: Text.ElideRight
-                color: root.contentForeground
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.title
-                font.bold: true
-              }
-
-              Text {
-                width: parent.width
-                text: root.configured
-                  ? root.scheduleStatus.itemCount + " ACTIVIDADES IMPORTADAS"
-                  : "SIN HORARIO IMPORTADO"
-                elide: Text.ElideRight
-                color: Qt.darker(root.contentForeground, 1.45)
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                font.letterSpacing: 1
-              }
-            }
-
-            Text {
-              id: heroCount
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              text: root.todayCount
-              color: root.contentForeground
-              opacity: root.configured ? 1 : 0.35
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.displayLarge
-              font.bold: true
-            }
-          }
-
-          PanelSeparator { foreground: root.contentForeground }
-
-          PanelSectionHeader {
-            text: "PRÓXIMAS ACTIVIDADES"
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-          }
-
-          Text {
-            visible: !root.configured
-            width: parent.width
-            text: "Importa un CSV para ver aquí tu horario recurrente."
-            wrapMode: Text.WordWrap
-            color: Qt.darker(root.contentForeground, 1.35)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.body
-          }
-
-          Text {
-            visible: root.configured && root.visibleEvents.length === 0
-            width: parent.width
-            text: "No hay actividades durante los próximos 120 días."
-            wrapMode: Text.WordWrap
-            color: Qt.darker(root.contentForeground, 1.35)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.body
-          }
-
-          Repeater {
-            model: root.visibleEvents
-
-            Rectangle {
-              required property var modelData
-              readonly property bool activeNow: modelData.active === true
-              width: content.width
-              implicitHeight: eventContent.implicitHeight + Style.space(14)
-              radius: Style.cornerRadius
-              color: activeNow
-                ? Style.selectedFillFor(root.contentForeground, Color.accent)
-                : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.055)
-              border.width: activeNow ? Math.max(1, Style.normalBorderWidth) : 0
-              border.color: Style.selectedStateColor(root.contentForeground, Color.accent)
-
-              Column {
-                id: eventContent
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Style.space(10)
-                anchors.rightMargin: Style.space(10)
-                spacing: Style.space(3)
-
-                Row {
-                  width: parent.width
-                  spacing: Style.space(8)
-
-                  Text {
-                    id: eventDate
-                    width: Style.space(86)
-                    text: root.eventDateLabel(modelData.date).toUpperCase()
-                    color: activeNow ? root.contentForeground : Qt.darker(root.contentForeground, 1.35)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                  }
-
-                  Text {
-                    width: parent.width - eventDate.width - parent.spacing
-                      - (activeStatus.visible ? activeStatus.implicitWidth + parent.spacing : 0)
-                    text: modelData.title
-                    elide: Text.ElideRight
-                    color: root.contentForeground
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.body
-                    font.bold: true
-                  }
-
-                  Text {
-                    id: activeStatus
-                    visible: activeNow
-                    text: "EN CLASE"
-                    color: Style.selectedStateColor(root.contentForeground, Color.accent)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                    font.letterSpacing: 0.8
-                  }
-                }
-
-                Text {
-                  width: parent.width
-                  text: modelData.startTime + " - " + modelData.endTime
-                    + (modelData.location ? "  ·  " + modelData.location : "")
-                  elide: Text.ElideRight
-                  color: activeNow ? root.contentForeground : Qt.darker(root.contentForeground, 1.45)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-              }
-            }
-          }
-
-          Text {
-            visible: root.upcomingEvents.length > root.visibleEvents.length
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: "+ " + (root.upcomingEvents.length - root.visibleEvents.length) + " actividades posteriores"
-            color: Qt.darker(root.contentForeground, 1.55)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          PanelSeparator { foreground: root.contentForeground }
-
-          PanelSectionHeader {
-            text: root.configured ? "REEMPLAZAR HORARIO DESDE CSV" : "IMPORTAR HORARIO DESDE CSV"
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-          }
-
-          Row {
-            width: parent.width
-            spacing: Style.space(8)
-
-            TextField {
-              id: pathField
-              width: parent.width - browseButton.width - parent.spacing
-              placeholderText: "/ruta/al/horario.csv"
-              text: root.csvPath
-              foreground: root.contentForeground
-              font.family: root.contentFontFamily
-              activeFocusOnTab: false
-              onTextChanged: root.csvPath = text
-              onAccepted: root.previewCsv()
-              Keys.onEscapePressed: {
-                focus = false
-                keyCatcher.forceActiveFocus()
-              }
-            }
-
-            Button {
-              id: browseButton
-              text: root.choosing ? "Abierto..." : "Buscar"
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              bordered: true
-              enabled: !root.busy
-              opacity: enabled ? 1 : 0.45
-              onClicked: root.chooseCsv()
-            }
-          }
-
-          Button {
-            width: parent.width
-            text: root.previewing ? "Validando..." : "Previsualizar CSV"
-            iconText: root.previewing ? "\uf110" : "\uf06e"
-            iconSpinning: root.previewing
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-            bordered: true
-            enabled: !root.busy && String(root.csvPath).trim() !== ""
-            opacity: enabled ? 1 : 0.45
-            onClicked: root.previewCsv()
-          }
-
-          Text {
-            visible: root.notice !== ""
-            width: parent.width
-            text: root.notice
-            wrapMode: Text.WordWrap
-            color: root.noticeIsError ? Color.urgent : root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Repeater {
-            model: root.first(root.previewErrors, 5)
-
-            Text {
-              required property var modelData
-              width: content.width
-              text: (Number(modelData.row || 0) > 0 ? "Fila " + modelData.row + ": " : "") + modelData.message
-              wrapMode: Text.WordWrap
-              color: Color.urgent
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-          }
-
-          Repeater {
-            model: root.first(root.previewWarnings, 3)
-
-            Text {
-              required property var modelData
-              width: content.width
-              text: String(modelData)
-              wrapMode: Text.WordWrap
-              color: Qt.darker(root.contentForeground, 1.4)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-          }
-
-          Column {
-            visible: root.previewItems.length > 0
-            width: parent.width
-            spacing: Style.space(6)
-
-            PanelSectionHeader {
-              text: "VISTA PREVIA"
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-            }
-
-            Repeater {
-              model: root.first(root.previewItems, 6)
-
-              Row {
-                required property var modelData
-                width: parent.width
-                spacing: Style.space(8)
-
-                Text {
-                  width: Style.space(88)
-                  text: modelData.startTime + " - " + modelData.endTime
-                  color: Qt.darker(root.contentForeground, 1.35)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-
-                Text {
-                  width: parent.width - Style.space(96)
-                  text: modelData.title + "  ·  " + root.recurrenceLabel(modelData)
-                  elide: Text.ElideRight
-                  color: root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-              }
-            }
-
-            Text {
-              visible: root.previewItems.length > 6
-              width: parent.width
-              text: "+ " + (root.previewItems.length - 6) + " filas"
-              horizontalAlignment: Text.AlignHCenter
-              color: Qt.darker(root.contentForeground, 1.55)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.caption
-            }
-          }
-
-          Button {
-            visible: root.previewItems.length > 0
-            width: parent.width
-            text: root.importing
-              ? "Importando..."
-              : (root.configured ? "Importar y reemplazar horario" : "Importar horario")
-            iconText: root.importing ? "\uf110" : "\uf56f"
-            iconSpinning: root.importing
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-            bordered: true
-            active: root.previewReady
-            enabled: root.previewReady && !root.busy
-            opacity: enabled ? 1 : 0.45
-            onClicked: root.importCsv()
-          }
-
-          Text {
-            width: parent.width
-            text: "Columnas: titulo, dia_semana, dia_mes, hora_inicio, hora_fin, repeticion, desde, hasta, ubicacion y descripcion."
-            wrapMode: Text.WordWrap
-            color: Qt.darker(root.contentForeground, 1.65)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
+        Item {
+          id: deleteDialogFocus
+          anchors.fill: parent
+          focus: deleteDialog.opened
+          Keys.onPressed: function(event) {
+            event.accepted = deleteDialog.handleKey(event)
           }
         }
       }
