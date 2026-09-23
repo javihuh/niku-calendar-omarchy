@@ -28,11 +28,16 @@ Panel {
     items: [],
     itemCount: 0,
     todayCount: 0,
+    referenceDate: "",
+    weekStart: "",
+    weekEnd: "",
     events: []
   })
   readonly property bool configured: scheduleStatus.configured === true
   readonly property int todayCount: Number(scheduleStatus.todayCount || 0)
   readonly property string scheduleTitle: String(scheduleStatus.title || "Schedule")
+  readonly property string periodView: String(setting("calendarView", "Day")).toLowerCase() === "week"
+    ? "week" : "day"
 
   property string viewMode: "main"
   property string selectedActivityId: ""
@@ -110,6 +115,27 @@ Panel {
 
   function backendCommand(parts) {
     return ["python3", helperPath, "--language", languageCode].concat(parts)
+  }
+
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) {
+      if (existing !== "id") entry[existing] = root.settings[existing]
+    }
+    for (var key in values) entry[key] = values[key]
+
+    root.settings = entry
+    if (root.hostWidget && "settings" in root.hostWidget)
+      root.hostWidget.settings = entry
+    if (root.bar && root.bar.shell
+        && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function setPeriodView(value) {
+    var normalized = String(value || "").toLowerCase() === "week" ? "week" : "day"
+    if (normalized === periodView) return
+    persistSettings({ calendarView: normalized === "week" ? "Week" : "Day" })
   }
 
   function rerunPreviewForLanguage() {
@@ -702,7 +728,7 @@ Panel {
     open: root.opened
     centerOnBar: false
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(540))
+    contentWidth: panel.fittedContentWidth(Style.space(480))
     contentHeight: panel.fittedContentHeight(Style.space(680))
 
     PanelKeyCatcher {
@@ -726,6 +752,7 @@ Panel {
         visible: root.viewMode === "main"
         scheduleStatus: root.scheduleStatus
         languageCode: root.languageCode
+        periodView: root.periodView
         previewData: root.previewData
         notice: root.notice
         noticeIsError: root.noticeIsError
@@ -738,6 +765,7 @@ Panel {
         onRenameRequested: function(title) { root.renameSchedule(title) }
         onAddRequested: root.startCreate("main")
         onManageRequested: root.showManage()
+        onPeriodViewRequested: function(value) { root.setPeriodView(value) }
         onActivityRequested: function(activityId) { root.openActivity(activityId, "main") }
         onChooseRequested: root.chooseCsv()
         onPreviewRequested: root.previewCsv()

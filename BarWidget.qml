@@ -85,7 +85,7 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "\uf073"
+    text: "\uDB80\uDD1B"
     active: root.opened
     dimmed: !root.configured
     tooltipText: !root.configured

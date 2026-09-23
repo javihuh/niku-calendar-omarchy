@@ -47,4 +47,16 @@ TestCase {
     compare(I18n.weekdayOptions("en")[2].value, "2")
     compare(I18n.weekdayOptions("es")[2].label, "Miércoles")
   }
+
+  function test_daily_encouragement_is_stable_and_localized() {
+    var englishToday = I18n.dailyEncouragement("en", "2026-09-23")
+    var englishTomorrow = I18n.dailyEncouragement("en", "2026-09-24")
+
+    verify(englishToday.length > 0)
+    verify(englishTomorrow.length > 0)
+    verify(englishToday !== englishTomorrow)
+    compare(I18n.dailyEncouragement("en", "2026-09-23"), englishToday)
+    verify(I18n.dailyEncouragement("es", "2026-09-23") !== englishToday)
+    compare(I18n.dailyEncouragement("es", "invalid"), "")
+  }
 }

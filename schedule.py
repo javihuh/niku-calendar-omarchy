@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CSV import and recurrence engine for the Recurring Schedule plugin."""
+"""CSV import and recurrence engine for the Niku Calendar plugin."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ MAX_JSON_BYTES = 1024 * 1024
 STATE_HOME = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
 STATE_FILE = STATE_HOME / "omarchy" / "recurring-schedule" / "schedule.json"
 REMINDER_STATE_FILE = STATE_FILE.with_name("reminders.json")
-REMINDER_LEAD_MINUTES = 5
+REMINDER_LEAD_MINUTES = 10
 REMINDER_RETENTION_DAYS = 7
 
 CANONICAL_FIELDS = {
@@ -175,7 +175,7 @@ BACKEND_MESSAGES = {
         "csv_extension": "The selected file must use the .csv extension.",
         "csv_too_large": "The CSV file is larger than 2 MiB.",
         "picker_requirements": "The file picker requires xdg-terminal-exec and yazi; enter the CSV path manually.",
-        "picker_title": "Recurring Schedule - CSV",
+        "picker_title": "Niku Calendar - CSV",
         "csv_binary": "The CSV file contains binary data.",
         "date_format": "{label} must use YYYY-MM-DD.",
         "time_format": "{label} must use HH:MM.",
@@ -233,7 +233,7 @@ BACKEND_MESSAGES = {
         "reminder_read": "The reminder history could not be read.",
         "reminder_format": "The reminder history uses an unsupported format.",
         "notification_unavailable": "The Omarchy notification command is unavailable.",
-        "notification_app": "Recurring Schedule",
+        "notification_app": "Niku Calendar",
         "notification_one": "Activity in 1 minute",
         "notification_other": "Activity in {minutes} minutes",
         "notification_failed": "The activity notification could not be sent: {error}",
@@ -258,7 +258,7 @@ BACKEND_MESSAGES = {
         "field_link_url": "link url",
         "field_link_label": "link {index} label",
         "field_date": "date",
-        "cli_description": "CSV import and recurrence engine for the Recurring Schedule plugin.",
+        "cli_description": "CSV import and recurrence engine for the Niku Calendar plugin.",
         "cli_language": "Language for messages, the file picker, and notifications",
         "cli_preview": "Validate and preview a CSV file",
         "cli_import": "Import a validated CSV file",
@@ -270,7 +270,7 @@ BACKEND_MESSAGES = {
         "cli_update": "Update an activity by ID using a stdin JSON payload",
         "cli_delete": "Delete an activity by ID using a stdin JSON payload",
         "cli_choose": "Choose a CSV with Yazi in an external terminal",
-        "cli_remind": "Notify for activities starting in five minutes",
+        "cli_remind": "Notify for activities starting in ten minutes",
         "cli_clear": "Delete the imported schedule",
     },
     "es": {
@@ -280,7 +280,7 @@ BACKEND_MESSAGES = {
         "csv_extension": "El archivo seleccionado debe usar la extensión .csv.",
         "csv_too_large": "El archivo CSV supera los 2 MiB.",
         "picker_requirements": "El selector de archivos requiere xdg-terminal-exec y yazi; introduce la ruta del CSV manualmente.",
-        "picker_title": "Horario recurrente - CSV",
+        "picker_title": "Niku Calendar - CSV",
         "csv_binary": "El archivo CSV contiene datos binarios.",
         "date_format": "{label} debe usar AAAA-MM-DD.",
         "time_format": "{label} debe usar HH:MM.",
@@ -338,7 +338,7 @@ BACKEND_MESSAGES = {
         "reminder_read": "No se pudo leer el historial de recordatorios.",
         "reminder_format": "El historial de recordatorios usa un formato no compatible.",
         "notification_unavailable": "El comando de notificaciones de Omarchy no está disponible.",
-        "notification_app": "Horario recurrente",
+        "notification_app": "Niku Calendar",
         "notification_one": "Actividad en 1 minuto",
         "notification_other": "Actividad en {minutes} minutos",
         "notification_failed": "No se pudo enviar la notificación de la actividad: {error}",
@@ -363,7 +363,7 @@ BACKEND_MESSAGES = {
         "field_link_url": "la URL del enlace",
         "field_link_label": "la etiqueta del enlace {index}",
         "field_date": "la fecha",
-        "cli_description": "Motor de importación CSV y recurrencias para el plugin Horario recurrente.",
+        "cli_description": "Motor de importación CSV y recurrencias para el plugin Niku Calendar.",
         "cli_language": "Idioma de los mensajes, el selector de archivos y las notificaciones",
         "cli_preview": "Validar y previsualizar un archivo CSV",
         "cli_import": "Importar un archivo CSV validado",
@@ -375,7 +375,7 @@ BACKEND_MESSAGES = {
         "cli_update": "Actualizar una actividad por id mediante un contenido JSON por stdin",
         "cli_delete": "Eliminar una actividad por id mediante un contenido JSON por stdin",
         "cli_choose": "Elegir un CSV con Yazi en una terminal externa",
-        "cli_remind": "Notificar las actividades que empiezan en cinco minutos",
+        "cli_remind": "Notificar las actividades que empiezan en diez minutos",
         "cli_clear": "Eliminar el horario importado",
     },
 }
@@ -984,17 +984,30 @@ def expand_occurrences(
 
 
 def event_is_active(event: dict[str, Any], now: datetime) -> bool:
-    if event.get("date") != now.date().isoformat():
-        return False
+    return event_state(event, now) == "active"
+
+
+def event_state(event: dict[str, Any], now: datetime) -> str:
+    current = local_datetime(now)
+    event_date = str(event.get("date") or "")
+    today = current.date().isoformat()
+    if event_date < today:
+        return "occurred"
+    if event_date > today:
+        return "upcoming"
     try:
         start_hour, start_minute = (int(part) for part in event["startTime"].split(":"))
         end_hour, end_minute = (int(part) for part in event["endTime"].split(":"))
     except (KeyError, TypeError, ValueError):
-        return False
-    current_minutes = now.hour * 60 + now.minute
+        return "upcoming"
+    current_minutes = current.hour * 60 + current.minute
     start_minutes = start_hour * 60 + start_minute
     end_minutes = end_hour * 60 + end_minute
-    return start_minutes <= current_minutes < end_minutes
+    if current_minutes >= end_minutes:
+        return "occurred"
+    if current_minutes >= start_minutes:
+        return "active"
+    return "upcoming"
 
 
 def local_datetime(value: datetime) -> datetime:
@@ -1534,15 +1547,21 @@ def status_payload(
     days: int = 120,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    reference_now = now or datetime.now()
+    reference_now = local_datetime(now or datetime.now())
     current = today or reference_now.date()
     if today is not None and now is None:
         reference_now = datetime.combine(today, reference_now.time())
     window_days = min(max(int(days), 1), 3660)
+    week_start = current - timedelta(days=current.weekday())
+    week_end = week_start + timedelta(days=6)
+    range_end = max(week_end, current + timedelta(days=window_days))
     items = store.get("items", [])
-    events = expand_occurrences(items, current, current + timedelta(days=window_days))
+    events = expand_occurrences(items, week_start, current - timedelta(days=1))
+    events += expand_occurrences(items, current, range_end)
+    events = events[:MAX_OCCURRENCES]
     for event in events:
-        event["active"] = event_is_active(event, reference_now)
+        event["state"] = event_state(event, reference_now)
+        event["active"] = event["state"] == "active"
     today_key = current.isoformat()
     active_events = [event for event in events if event["active"]]
     return {
@@ -1556,6 +1575,11 @@ def status_payload(
         "importedAt": store.get("importedAt", ""),
         "items": items,
         "itemCount": len(items),
+        "referenceDate": current.isoformat(),
+        "weekStart": week_start.isoformat(),
+        "weekEnd": week_end.isoformat(),
+        "rangeStart": week_start.isoformat(),
+        "rangeEnd": range_end.isoformat(),
         "todayCount": sum(1 for event in events if event["date"] == today_key),
         "activeCount": len(active_events),
         "activeTitle": active_events[0]["title"] if active_events else "",

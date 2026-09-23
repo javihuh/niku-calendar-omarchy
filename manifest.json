@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "io.github.javihuh.schedule",
-  "name": "Recurring Schedule",
-  "version": "0.3.0",
+  "name": "Niku Calendar",
+  "version": "0.4.0",
   "author": "javihuh",
   "license": "MIT",
   "description": "Create and edit recurring activities, attach notes and links, import CSV schedules, and receive reminders.",
@@ -13,13 +13,14 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Recurring Schedule",
-    "description": "Editable recurring schedule with notes, links, CSV import, and reminders",
+    "displayName": "Niku Calendar",
+    "description": "Cat-inspired recurring schedule with notes, links, CSV import, and reminders",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "language": "English"
+      "language": "English",
+      "calendarView": "Day"
     },
     "schema": [
       {
@@ -32,6 +33,17 @@
         ],
         "defaultValue": "English",
         "description": "Language used by the widget, panel, validation messages, file picker, and reminders."
+      },
+      {
+        "key": "calendarView",
+        "type": "enum",
+        "label": "Calendar view",
+        "options": [
+          "Day",
+          "Week"
+        ],
+        "defaultValue": "Day",
+        "description": "Default activity view. Changes made in the panel are remembered."
       }
     ]
   }

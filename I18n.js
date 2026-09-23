@@ -67,12 +67,15 @@ var catalogs = {
     "main.browseOpen": "Opened...",
     "main.columns": "Columns: title, weekday, monthday, start_time, end_time, recurrence, start_date, end_date, location, and description.",
     "main.empty": "Add an activity or import a CSV to get started.",
-    "main.importHeading": "IMPORT AND REPLACE ACTIVITIES FROM CSV",
+    "main.importHeading": "IMPORT CSV",
     "main.importReplace": "Import and replace activities",
     "main.importWarning": "Importing replaces every activity. Manually added notes and links will also be replaced.",
     "main.importing": "Importing...",
     "main.manage": "Manage activities",
+    "main.noToday": "No activities today. Time for a catnap.",
+    "main.noWeek": "No activities this week. Time for a catnap.",
     "main.noUpcoming": "No activities during the next 120 days.",
+    "main.occurred": "OCCURRED",
     "main.pathPlaceholder": "/path/to/schedule.csv",
     "main.preview": "PREVIEW",
     "main.previewCsv": "Preview CSV",
@@ -80,6 +83,10 @@ var catalogs = {
     "main.saveName": "Save name",
     "main.upcoming": "UPCOMING ACTIVITIES",
     "main.validating": "Validating...",
+    "main.viewDay": "Day",
+    "main.viewWeek": "Week",
+    "main.todayActivities": "TODAY'S ACTIVITIES",
+    "main.weekActivities": "THIS WEEK'S ACTIVITIES",
     "manager.empty": "There are no activities yet. You can add the first one without importing a CSV.",
     "manager.title": "Manage activities",
     "notice.activityCreated": "Activity created.",
@@ -180,12 +187,15 @@ var catalogs = {
     "main.browseOpen": "Abierto...",
     "main.columns": "Columnas: titulo, dia_semana, dia_mes, hora_inicio, hora_fin, repeticion, desde, hasta, ubicacion y descripcion.",
     "main.empty": "Añade una actividad o importa un CSV para empezar.",
-    "main.importHeading": "IMPORTAR Y REEMPLAZAR ACTIVIDADES DESDE CSV",
+    "main.importHeading": "IMPORTAR CSV",
     "main.importReplace": "Importar y reemplazar actividades",
     "main.importWarning": "La importación reemplaza todas las actividades. Las notas y los enlaces añadidos manualmente también se reemplazarán.",
     "main.importing": "Importando...",
     "main.manage": "Gestionar actividades",
+    "main.noToday": "No hay actividades hoy. Hora de una siesta.",
+    "main.noWeek": "No hay actividades esta semana. Hora de una siesta.",
     "main.noUpcoming": "No hay actividades durante los próximos 120 días.",
+    "main.occurred": "OCURRIÓ",
     "main.pathPlaceholder": "/ruta/al/horario.csv",
     "main.preview": "VISTA PREVIA",
     "main.previewCsv": "Previsualizar CSV",
@@ -193,6 +203,10 @@ var catalogs = {
     "main.saveName": "Guardar nombre",
     "main.upcoming": "PRÓXIMAS ACTIVIDADES",
     "main.validating": "Validando...",
+    "main.viewDay": "Día",
+    "main.viewWeek": "Semana",
+    "main.todayActivities": "ACTIVIDADES DE HOY",
+    "main.weekActivities": "ACTIVIDADES DE ESTA SEMANA",
     "manager.empty": "Todavía no hay actividades. Puedes añadir la primera sin importar un CSV.",
     "manager.title": "Gestionar actividades",
     "notice.activityCreated": "Actividad creada.",
@@ -242,6 +256,27 @@ var shortMonths = {
 var longMonths = {
   en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
   es: ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+}
+
+var dailyEncouragements = {
+  en: [
+    "You've got this! (=^･ω･^=)",
+    "One step at a time. ฅ^•ﻌ•^ฅ",
+    "Go get it, clever cat! (•ㅅ•)",
+    "Today is yours. /ᐠ｡ꞈ｡ᐟ\\",
+    "Steady paws, great progress. ฅ(＾・ω・＾ฅ)",
+    "Small steps still count. (=｀ω´=)",
+    "Ready to pounce! (ฅ`･ω･´)っ"
+  ],
+  es: [
+    "¡Tú puedes! (=^･ω･^=)",
+    "Un paso a la vez. ฅ^•ﻌ•^ฅ",
+    "¡A por ello, michi! (•ㅅ•)",
+    "Hoy es tuyo. /ᐠ｡ꞈ｡ᐟ\\",
+    "Patitas firmes, gran progreso. ฅ(＾・ω・＾ฅ)",
+    "Los pequeños pasos también cuentan. (=｀ω´=)",
+    "¡Listo para saltar! (ฅ`･ω･´)っ"
+  ]
 }
 
 function languageCode(value) {
@@ -329,4 +364,13 @@ function longDate(language, value) {
   if (code === "es")
     return date.getDate() + " de " + longMonths.es[date.getMonth()] + " de " + year
   return longMonths.en[date.getMonth()] + " " + date.getDate() + ", " + year
+}
+
+function dailyEncouragement(language, value) {
+  var date = parsedDate(value)
+  if (!date) return ""
+  var messages = dailyEncouragements[languageCode(language)]
+  var dayNumber = Math.floor(Date.UTC(
+    date.getFullYear(), date.getMonth(), date.getDate()) / 86400000)
+  return messages[dayNumber % messages.length]
 }

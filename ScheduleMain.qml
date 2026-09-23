@@ -2,12 +2,14 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "I18n.js" as I18n
+import "ScheduleView.js" as ScheduleView
 
 Item {
   id: root
 
   property var scheduleStatus: ({})
   property string languageCode: "en"
+  property string periodView: "day"
   property var previewData: null
   property string csvPath: ""
   property string notice: ""
@@ -22,8 +24,13 @@ Item {
 
   readonly property bool configured: scheduleStatus.configured === true
   readonly property int todayCount: Number(scheduleStatus.todayCount || 0)
-  readonly property var upcomingEvents: scheduleStatus.events || []
-  readonly property var visibleEvents: first(upcomingEvents, 8)
+  readonly property string referenceDate: String(scheduleStatus.referenceDate || "")
+  readonly property string weekStart: String(scheduleStatus.weekStart || "")
+  readonly property string weekEnd: String(scheduleStatus.weekEnd || "")
+  readonly property var periodEvents: ScheduleView.eventsForView(
+    scheduleStatus.events || [], periodView, referenceDate, weekStart, weekEnd)
+  readonly property var eventGroups: ScheduleView.groupsForView(
+    scheduleStatus.events || [], periodView, referenceDate, weekStart, weekEnd)
   readonly property var previewItems: previewData && previewData.items ? previewData.items : []
   readonly property var previewErrors: previewData && previewData.errors ? previewData.errors : []
   readonly property var previewWarnings: previewData && previewData.warnings ? previewData.warnings : []
@@ -33,6 +40,7 @@ Item {
   signal renameRequested(string title)
   signal addRequested()
   signal manageRequested()
+  signal periodViewRequested(string value)
   signal activityRequested(string activityId)
   signal chooseRequested()
   signal previewRequested()
@@ -99,7 +107,7 @@ Item {
           textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "\uf073"
+          text: "\uDB80\uDD1B"
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.displayLarge
@@ -213,10 +221,55 @@ Item {
         onClicked: root.manageRequested()
       }
 
+      Row {
+        width: parent.width
+        spacing: Style.spacing.lg
+
+        Button {
+          width: (parent.width - parent.spacing) / 2
+          text: I18n.t(root.languageCode, "main.viewDay")
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          bordered: true
+          active: root.periodView === "day"
+          focusable: true
+          enabled: !root.busy
+          onClicked: root.periodViewRequested("day")
+        }
+
+        Button {
+          width: (parent.width - parent.spacing) / 2
+          text: I18n.t(root.languageCode, "main.viewWeek")
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          bordered: true
+          active: root.periodView === "week"
+          focusable: true
+          enabled: !root.busy
+          onClicked: root.periodViewRequested("week")
+        }
+      }
+
       PanelSectionHeader {
-        text: I18n.t(root.languageCode, "main.upcoming")
+        text: root.periodView === "week"
+          ? I18n.t(root.languageCode, "main.weekActivities")
+          : I18n.t(root.languageCode, "main.todayActivities")
         foreground: root.foreground
         fontFamily: root.fontFamily
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: root.configured && root.periodView === "day"
+          && root.periodEvents.length > 0
+        width: parent.width
+        text: I18n.dailyEncouragement(root.languageCode, root.referenceDate)
+        wrapMode: Text.WordWrap
+        color: root.foreground
+        opacity: 0.72
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.italic: true
       }
 
       Text {
@@ -232,116 +285,150 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: root.configured && root.visibleEvents.length === 0
+        visible: root.configured && root.periodEvents.length === 0
         width: parent.width
-        text: I18n.t(root.languageCode, "main.noUpcoming")
+        text: root.periodView === "week"
+          ? I18n.t(root.languageCode, "main.noWeek")
+          : I18n.t(root.languageCode, "main.noToday")
         wrapMode: Text.WordWrap
         color: Qt.darker(root.foreground, 1.35)
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
       }
 
-      Repeater {
-        model: root.visibleEvents
+      Column {
+        visible: root.eventGroups.length > 0
+        width: parent.width
+        spacing: Style.space(12)
 
-        Rectangle {
-          id: eventCard
-          required property var modelData
-          readonly property bool activeNow: modelData.active === true
-          width: mainContent.width
-          implicitHeight: eventContent.implicitHeight + Style.space(14)
-          radius: Style.cornerRadius
-          color: activeNow
-            ? Style.selectedFillFor(root.foreground, Color.accent)
-            : (eventMouse.containsMouse
-              ? Style.hoverFillFor(root.foreground, Color.accent)
-              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055))
-          border.width: activeNow ? Math.max(1, Style.normalBorderWidth) : 0
-          border.color: Style.selectedStateColor(root.foreground, Color.accent)
+        Repeater {
+          model: root.eventGroups
 
           Column {
-            id: eventContent
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: Style.space(10)
-            anchors.rightMargin: Style.space(10)
-            spacing: Style.spacing.xs
+            id: dayGroup
+            required property var modelData
+            width: mainContent.width
+            spacing: Style.spacing.md
 
-            Row {
+            PanelSectionHeader {
+              visible: root.periodView === "week"
               width: parent.width
-              spacing: Style.spacing.lg
-
-              Text {
-                id: eventDate
-                textFormat: Text.PlainText
-                width: Style.space(86)
-                text: root.eventDateLabel(eventCard.modelData.date).toUpperCase()
-                color: eventCard.activeNow ? root.foreground : Qt.darker(root.foreground, 1.35)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width - eventDate.width - parent.spacing
-                  - (activeStatus.visible ? activeStatus.implicitWidth + parent.spacing : 0)
-                text: String(eventCard.modelData.title || "")
-                elide: Text.ElideRight
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
-
-              Text {
-                id: activeStatus
-                textFormat: Text.PlainText
-                visible: eventCard.activeNow
-                text: I18n.t(root.languageCode, "main.active")
-                color: Style.selectedStateColor(root.foreground, Color.accent)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                font.letterSpacing: 0.8
-              }
+              text: I18n.longDate(root.languageCode, dayGroup.modelData.date)
+              foreground: root.foreground
+              fontFamily: root.fontFamily
             }
 
-            Text {
-              textFormat: Text.PlainText
-              width: parent.width
-              text: String(eventCard.modelData.startTime || "") + " - "
-                + String(eventCard.modelData.endTime || "")
-                + (eventCard.modelData.location ? " · " + String(eventCard.modelData.location) : "")
-              elide: Text.ElideRight
-              color: eventCard.activeNow ? root.foreground : Qt.darker(root.foreground, 1.45)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-          }
+            Repeater {
+              model: dayGroup.modelData.events
 
-          MouseArea {
-            id: eventMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            enabled: !root.busy
-            onClicked: root.activityRequested(String(eventCard.modelData.activityId || ""))
+              Rectangle {
+                id: eventCard
+                required property var modelData
+                readonly property string temporalState: String(modelData.state
+                  || (modelData.active === true ? "active" : "upcoming"))
+                readonly property bool activeNow: temporalState === "active"
+                readonly property bool occurred: temporalState === "occurred"
+                width: dayGroup.width
+                implicitHeight: eventContent.implicitHeight + Style.space(14)
+                radius: Style.cornerRadius
+                color: activeNow
+                  ? Style.selectedFillFor(root.foreground, Color.accent)
+                  : occurred
+                    ? (eventMouse.containsMouse
+                      ? Style.hoverFillFor(Color.muted, Color.muted)
+                      : Style.normalFillFor(Color.muted, Color.muted))
+                    : (eventMouse.containsMouse
+                      ? Style.hoverFillFor(root.foreground, Color.accent)
+                      : Qt.rgba(root.foreground.r, root.foreground.g,
+                          root.foreground.b, 0.055))
+                border.width: activeNow ? Math.max(1, Style.normalBorderWidth) : 0
+                border.color: Style.selectedStateColor(root.foreground, Color.accent)
+
+                Column {
+                  id: eventContent
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.leftMargin: Style.space(10)
+                  anchors.rightMargin: Style.space(10)
+                  spacing: Style.spacing.xs
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.spacing.lg
+
+                    Text {
+                      id: eventDate
+                      textFormat: Text.PlainText
+                      width: Style.space(86)
+                      text: root.eventDateLabel(eventCard.modelData.date).toUpperCase()
+                      color: eventCard.activeNow ? root.foreground
+                        : (eventCard.occurred ? Color.muted
+                          : Qt.darker(root.foreground, 1.35))
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                    }
+
+                    Text {
+                      textFormat: Text.PlainText
+                      width: parent.width - eventDate.width - parent.spacing
+                        - (eventStatus.visible
+                          ? eventStatus.implicitWidth + parent.spacing : 0)
+                      text: String(eventCard.modelData.title || "")
+                      elide: Text.ElideRight
+                      color: eventCard.occurred ? Color.muted : root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      font.bold: true
+                    }
+
+                    Text {
+                      id: eventStatus
+                      textFormat: Text.PlainText
+                      visible: eventCard.activeNow || eventCard.occurred
+                      text: "\uf1b0  " + (eventCard.activeNow
+                        ? I18n.t(root.languageCode, "main.active")
+                        : I18n.t(root.languageCode, "main.occurred"))
+                      color: eventCard.activeNow
+                        ? Style.selectedStateColor(root.foreground, Color.accent)
+                        : Color.muted
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                      font.letterSpacing: 0.8
+                    }
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    width: parent.width
+                    text: String(eventCard.modelData.startTime || "") + " - "
+                      + String(eventCard.modelData.endTime || "")
+                      + (eventCard.modelData.location
+                        ? " · " + String(eventCard.modelData.location) : "")
+                    elide: Text.ElideRight
+                    color: eventCard.activeNow ? root.foreground
+                      : (eventCard.occurred ? Color.muted
+                        : Qt.darker(root.foreground, 1.45))
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+                }
+
+                MouseArea {
+                  id: eventMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  enabled: !root.busy
+                  onClicked: root.activityRequested(
+                    String(eventCard.modelData.activityId || ""))
+                }
+              }
+            }
           }
         }
-      }
-
-      Text {
-        textFormat: Text.PlainText
-        visible: root.upcomingEvents.length > root.visibleEvents.length
-        width: parent.width
-        horizontalAlignment: Text.AlignHCenter
-        text: I18n.plural(root.languageCode, "count.later",
-          root.upcomingEvents.length - root.visibleEvents.length)
-        color: Qt.darker(root.foreground, 1.55)
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
       }
 
       PanelSeparator { foreground: root.foreground }
@@ -358,7 +445,8 @@ Item {
 
         TextField {
           id: pathField
-          width: parent.width - browseButton.width - parent.spacing
+          width: parent.width - browseButton.width - previewButton.width
+            - parent.spacing * 2
           placeholderText: I18n.t(root.languageCode, "main.pathPlaceholder")
           text: root.csvPath
           foreground: root.foreground
@@ -378,7 +466,8 @@ Item {
 
         Button {
           id: browseButton
-          text: root.choosing
+          iconText: "\uf07c"
+          tooltipText: root.choosing
             ? I18n.t(root.languageCode, "main.browseOpen")
             : I18n.t(root.languageCode, "common.browse")
           foreground: root.foreground
@@ -388,21 +477,21 @@ Item {
           opacity: enabled ? 1 : 0.45
           onClicked: root.chooseRequested()
         }
-      }
 
-      Button {
-        width: parent.width
-        text: root.previewing
-          ? I18n.t(root.languageCode, "main.validating")
-          : I18n.t(root.languageCode, "main.previewCsv")
-        iconText: root.previewing ? "\uf110" : "\uf06e"
-        iconSpinning: root.previewing
-        foreground: root.foreground
-        fontFamily: root.fontFamily
-        bordered: true
-        enabled: !root.busy && String(root.csvPath).trim() !== ""
-        opacity: enabled ? 1 : 0.45
-        onClicked: root.previewRequested()
+        Button {
+          id: previewButton
+          iconText: root.previewing ? "\uf110" : "\uf06e"
+          iconSpinning: root.previewing
+          tooltipText: root.previewing
+            ? I18n.t(root.languageCode, "main.validating")
+            : I18n.t(root.languageCode, "main.previewCsv")
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          bordered: true
+          enabled: !root.busy && String(root.csvPath).trim() !== ""
+          opacity: enabled ? 1 : 0.45
+          onClicked: root.previewRequested()
+        }
       }
 
       Text {
@@ -532,6 +621,7 @@ Item {
 
       Text {
         textFormat: Text.PlainText
+        visible: pathField.activeFocus
         width: parent.width
         text: I18n.t(root.languageCode, "main.columns")
         wrapMode: Text.WordWrap

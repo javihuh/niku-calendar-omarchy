@@ -54,10 +54,16 @@ class ScheduleTests(unittest.TestCase):
         language = next(
             entry for entry in widget["schema"] if entry["key"] == "language"
         )
+        calendar_view = next(
+            entry for entry in widget["schema"] if entry["key"] == "calendarView"
+        )
 
         self.assertEqual(widget["defaults"]["language"], "English")
         self.assertEqual(language["defaultValue"], "English")
         self.assertEqual(language["options"], ["English", "Español"])
+        self.assertEqual(widget["defaults"]["calendarView"], "Day")
+        self.assertEqual(calendar_view["defaultValue"], "Day")
+        self.assertEqual(calendar_view["options"], ["Day", "Week"])
 
     def test_backend_translation_catalogs_have_matching_keys_and_placeholders(self):
         english = schedule.BACKEND_MESSAGES["en"]
@@ -260,8 +266,77 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(
             schedule.event_is_active(event, datetime(2026, 9, 15, 10, 30))
         )
+        self.assertEqual(
+            schedule.event_state(event, datetime(2026, 9, 15, 10, 30)),
+            "occurred",
+        )
 
-    def test_reminder_is_sent_once_five_minutes_before_class(self):
+    def test_event_state_distinguishes_upcoming_active_and_occurred(self):
+        event = {
+            "date": "2026-09-15",
+            "startTime": "10:00",
+            "endTime": "11:30",
+        }
+
+        self.assertEqual(
+            schedule.event_state(event, datetime(2026, 9, 15, 9, 59)),
+            "upcoming",
+        )
+        self.assertEqual(
+            schedule.event_state(event, datetime(2026, 9, 15, 10, 0)),
+            "active",
+        )
+        self.assertEqual(
+            schedule.event_state(event, datetime(2026, 9, 15, 11, 30)),
+            "occurred",
+        )
+        self.assertEqual(
+            schedule.event_state(event, datetime(2026, 9, 16, 8, 0)),
+            "occurred",
+        )
+
+    def test_status_includes_the_current_monday_to_sunday(self):
+        monday = self.activity(
+            id="monday",
+            title="Monday activity",
+            recurrence="once",
+            weekday=None,
+            startDate="2026-09-14",
+        )
+        sunday = self.activity(
+            id="sunday",
+            title="Sunday activity",
+            recurrence="once",
+            weekday=None,
+            startDate="2026-09-20",
+        )
+
+        status = schedule.status_payload(
+            {"items": [monday, sunday]},
+            days=1,
+            now=datetime(2026, 9, 16, 12, 0),
+        )
+
+        self.assertEqual(status["referenceDate"], "2026-09-16")
+        self.assertEqual(status["weekStart"], "2026-09-14")
+        self.assertEqual(status["weekEnd"], "2026-09-20")
+        self.assertEqual(
+            [(event["date"], event["state"]) for event in status["events"]],
+            [("2026-09-14", "occurred"), ("2026-09-20", "upcoming")],
+        )
+
+    def test_status_supports_the_maximum_window_midweek(self):
+        status = schedule.status_payload(
+            {"items": []},
+            days=3660,
+            now=datetime(2026, 9, 16, 12, 0),
+        )
+
+        self.assertEqual(status["rangeStart"], "2026-09-14")
+        self.assertEqual(status["rangeEnd"], "2036-09-23")
+        self.assertEqual(status["events"], [])
+
+    def test_reminder_is_sent_once_ten_minutes_before_class(self):
         store = {
             "items": [
                 {
@@ -284,7 +359,7 @@ class ScheduleTests(unittest.TestCase):
             state_path = Path(directory) / "reminders.json"
             first = schedule.notify_due_classes(
                 store,
-                now=datetime(2026, 9, 15, 9, 55),
+                now=datetime(2026, 9, 15, 9, 50),
                 state_path=state_path,
                 notifier=notifier,
             )
@@ -316,7 +391,7 @@ class ScheduleTests(unittest.TestCase):
 
         self.assertEqual(
             schedule.due_reminder_events(
-                [item], datetime(2026, 9, 15, 9, 54, 59)
+                [item], datetime(2026, 9, 15, 9, 49, 59)
             ),
             [],
         )
@@ -339,7 +414,7 @@ class ScheduleTests(unittest.TestCase):
 
         command = run.call_args.args[0]
         self.assertEqual(command[:3], ["/usr/bin/omarchy", "notification", "send"])
-        self.assertIn("Activity in 5 minutes", command)
+        self.assertIn("Activity in 10 minutes", command)
         self.assertIn("Programacion\n10:00 - 11:30 | Laboratorio 2", command)
 
         try:
@@ -349,8 +424,8 @@ class ScheduleTests(unittest.TestCase):
             ), mock.patch.object(schedule.subprocess, "run") as spanish_run:
                 schedule.send_class_notification(event)
             spanish_command = spanish_run.call_args.args[0]
-            self.assertIn("Actividad en 5 minutos", spanish_command)
-            self.assertIn("Horario recurrente", spanish_command)
+            self.assertIn("Actividad en 10 minutos", spanish_command)
+            self.assertIn("Niku Calendar", spanish_command)
         finally:
             schedule.set_language("en")
 

@@ -1,10 +1,10 @@
-# Recurring Schedule for Omarchy
+# Niku Calendar for Omarchy
 
 An independent Omarchy bar plugin for creating and editing recurring activities,
 opening class notes and links, importing CSV schedules, and receiving reminders.
 It does not replace or modify the built-in clock or other calendar widgets.
 
-![Editable Recurring Schedule panel](preview.png)
+![Niku Calendar panel](preview.png)
 
 ## Features
 
@@ -12,13 +12,17 @@ It does not replace or modify the built-in clock or other calendar widgets.
 - Complete English interface by default with optional Spanish localization.
 - Editable schedule title that persists independently of its activities.
 - Create, inspect, edit, and delete activities directly from the bar.
+- Switch between a remembered daily view and a Monday-to-Sunday weekly view.
+- Distinct upcoming, `IN PROGRESS`, and `OCCURRED` activity states.
+- A localized daily encouragement with a rotating cat kaomoji on busy days.
 - Per-activity plain-text notes and multiple labeled HTTP(S) links, with an
   option to copy the links to every activity sharing the same title.
 - Yazi file picker in an external terminal plus manual path input.
 - Preview and row-level validation before an import is saved.
 - One-time, weekly, biweekly, and monthly recurrence.
 - Automatic accent highlight and `IN PROGRESS` label for the current activity.
-- Native Omarchy notification five minutes before every activity.
+- Muted styling and an `OCCURRED` label for completed occurrences.
+- Native Omarchy notification ten minutes before every activity.
 - Comma, semicolon, and tab delimiter detection.
 - Spanish and English column aliases.
 - UTF-8 and Latin-1 input support.
@@ -30,7 +34,7 @@ It does not replace or modify the built-in clock or other calendar widgets.
 - Python 3; the helper uses only the standard library.
 - `yazi` and `xdg-terminal-exec` for the optional terminal file picker. A CSV
   path can still be entered manually when either command is unavailable.
-- The built-in Omarchy notification service for five-minute activity reminders.
+- The built-in Omarchy notification service for ten-minute activity reminders.
 
 The plugin requires no elevated privileges, package manager, background daemon,
 or network access.
@@ -97,8 +101,10 @@ contain that date. Use `ultimo` to run an activity on every month's final day.
 1. Click the calendar icon in the Omarchy bar.
 2. Choose **Add activity** to create an activity manually.
 3. Use **Manage activities** to inspect, edit, or delete complete recurring series.
-4. Select an upcoming activity to open its notes, links, and editing actions.
-5. Use the pencil beside the heading to rename the schedule.
+4. Switch between **Day** and **Week**. The weekly view covers Monday through
+   Sunday and groups activities by day.
+5. Select an activity occurrence to open its notes, links, and editing actions.
+6. Use the pencil beside the heading to rename the schedule.
 
 The editor accepts dates as `YYYY-MM-DD` and times as 24-hour `HH:MM` values.
 Weekly and biweekly activities use a weekday; monthly activities can use a day
@@ -109,6 +115,12 @@ time or apply it to all activities with the same title. If no other day or time
 has that title, both choices affect the same recurring series. Title matching
 ignores capitalization. Applying to every match copies the links rather than
 permanently synchronizing them, so one activity can later use a different URL.
+
+The selected Day or Week view is remembered in the Omarchy bar configuration.
+The large heading count always represents today's activities. An occurrence is
+marked `IN PROGRESS` from its start time until, but not including, its end time;
+at the end time it becomes `OCCURRED`. Past occurrences are regenerated from
+the current recurring series rather than stored as immutable history.
 
 ### Language
 
@@ -143,7 +155,7 @@ custom schedule title. The panel displays this warning before import.
 
 The plugin checks for upcoming activities every 30 seconds while the Omarchy
 shell is running. A native notification containing the activity name, time, and
-location is sent during the five-minute window before it starts. Notifications
+location is sent during the ten-minute window before it starts. Notifications
 use normal urgency and respect Do Not Disturb.
 
 ## Local Data
