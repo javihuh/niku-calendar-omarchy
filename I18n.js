@@ -275,7 +275,7 @@ var dailyEncouragements = {
     "Hoy es tuyo. /ᐠ｡ꞈ｡ᐟ\\",
     "Patitas firmes, gran progreso. ฅ(＾・ω・＾ฅ)",
     "Los pequeños pasos también cuentan. (=｀ω´=)",
-    "¡Listo para saltar! (ฅ`･ω･´)っ"
+    "¡Listo para hoy! (ฅ`･ω･´)っ"
   ]
 }
 

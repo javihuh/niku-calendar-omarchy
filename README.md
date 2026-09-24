@@ -4,6 +4,8 @@ An independent Omarchy bar plugin for creating and editing recurring activities,
 opening class notes and links, importing CSV schedules, and receiving reminders.
 It does not replace or modify the built-in clock or other calendar widgets.
 
+> Keep your plans close and your paws ready. (=^･ω･^=)
+
 ![Niku Calendar panel](preview.png)
 
 ## Features
@@ -64,37 +66,34 @@ omarchy plugin update io.github.javihuh.schedule
 Save the file as UTF-8 CSV with this header:
 
 ```csv
-titulo,dia_semana,dia_mes,hora_inicio,hora_fin,repeticion,desde,hasta,ubicacion,descripcion
-Matematicas,lunes,,08:00,09:30,semanal,2026-09-21,2026-12-18,Aula 3,Clase semanal
-Gimnasio,miercoles,,18:00,19:30,semanal,2026-09-23,,Centro deportivo,
-Pago de alquiler,,5,09:00,09:15,mensual,2026-10-05,,Casa,Recordatorio mensual
-Turno medico,,,11:00,12:00,una_vez,2026-10-14,2026-10-14,Clinica,Control
+title,weekday,monthday,start_time,end_time,recurrence,start_date,end_date,location,description
+Mathematics,monday,,08:00,09:30,weekly,2026-09-21,2026-12-18,Room 3,Weekly class
+Gym,wednesday,,18:00,19:30,weekly,2026-09-23,,Sports center,
+Rent payment,,5,09:00,09:15,monthly,2026-10-05,,Home,Monthly reminder
+Doctor appointment,,,11:00,12:00,once,2026-10-14,2026-10-14,Clinic,Checkup
 ```
 
-An editable example is included at `examples/horario.csv`.
+An editable example is included at `examples/schedule.csv`.
 
 ### Columns
 
 | Column | Required | Meaning |
 | --- | --- | --- |
-| `titulo` | Yes | Activity name |
-| `dia_semana` | Weekly/biweekly | `lunes` through `domingo`; inferred from `desde` when empty |
-| `dia_mes` | Monthly | `1` through `31` or `ultimo`; inferred from `desde` when empty |
-| `hora_inicio` | Yes | Start time in 24-hour `HH:MM` format |
-| `hora_fin` | Yes | End time in 24-hour `HH:MM` format |
-| `repeticion` | Yes | `una_vez`, `semanal`, `quincenal`, or `mensual` |
-| `desde` | Yes | First valid date in `YYYY-MM-DD` format |
-| `hasta` | No | Inclusive final date; empty means no end |
-| `ubicacion` | No | Location |
-| `descripcion` | No | Notes |
+| `title` | Yes | Activity name |
+| `weekday` | Weekly/biweekly | `monday` through `sunday`; inferred from `start_date` when empty |
+| `monthday` | Monthly | `1` through `31` or `last`; inferred from `start_date` when empty |
+| `start_time` | Yes | Start time in 24-hour `HH:MM` format |
+| `end_time` | Yes | End time in 24-hour `HH:MM` format |
+| `recurrence` | Yes | `once`, `weekly`, `biweekly`, or `monthly` |
+| `start_date` | Yes | First valid date in `YYYY-MM-DD` format |
+| `end_date` | No | Inclusive final date; empty means no end |
+| `location` | No | Location |
+| `description` | No | Notes |
 
-English aliases such as `title`, `weekday`, `monthday`, `start_time`,
-`end_time`, `recurrence`, `start_date`, `end_date`, `location`, and
-`description` are also accepted. English recurrence values (`once`, `weekly`,
-`biweekly`, and `monthly`) work as well.
+Spanish column and recurrence aliases are also accepted for compatibility.
 
 Monthly day `29`, `30`, or `31` activities are skipped in months that do not
-contain that date. Use `ultimo` to run an activity on every month's final day.
+contain that date. Use `last` to run an activity on every month's final day.
 
 ## Usage
 
@@ -213,8 +212,8 @@ python3 -m unittest discover -s tests -v
 The helper can also be exercised directly:
 
 ```bash
-python3 schedule.py preview examples/horario.csv
-python3 schedule.py import examples/horario.csv
+python3 schedule.py preview examples/schedule.csv
+python3 schedule.py import examples/schedule.csv
 python3 schedule.py status
 python3 schedule.py remind
 ```
@@ -223,7 +222,7 @@ Backend messages default to English. Pass `--language es` before the command
 to exercise Spanish output, for example:
 
 ```bash
-python3 schedule.py --language es preview examples/horario.csv
+python3 schedule.py --language es preview examples/schedule.csv
 ```
 
 Mutation commands (`rename-schedule`, `create-activity`, `update-activity`, and
@@ -237,3 +236,8 @@ fully validated before changing saved data.
 ## License
 
 MIT, copyright 2026 javihuh.
+
+## Support
+
+If Niku Calendar is useful to you, you can support its development on
+[Ko-fi](https://ko-fi.com/javihuh). ฅ^•ﻌ•^ฅ
