@@ -240,4 +240,4 @@ MIT, copyright 2026 javihuh.
 ## Support
 
 If Niku Calendar is useful to you, you can support its development on
-[Ko-fi](https://ko-fi.com/javihuh). ฅ^•ﻌ•^ฅ
+[Ko-fi](https://ko-fi.com/javihuh) and check it out my art ฅ^•ﻌ•^ฅ
