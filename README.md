@@ -46,7 +46,7 @@ or network access.
 Install and enable the plugin with:
 
 ```bash
-omarchy plugin add https://github.com/javihuh/recurring-schedule-omarchy.git --enable
+omarchy plugin add https://github.com/javihuh/niku-calendar-omarchy.git --enable
 ```
 
 The widget defaults to the right section of the bar. Move it if desired:
