@@ -2,14 +2,16 @@
   "schemaVersion": 1,
   "id": "io.github.javihuh.schedule",
   "name": "Niku Calendar",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "javihuh",
   "license": "MIT",
   "description": "Create and edit recurring activities, attach notes and links, import CSV schedules, and receive reminders.",
   "kinds": [
+    "service",
     "bar-widget"
   ],
   "entryPoints": {
+    "service": "Service.qml",
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
@@ -20,7 +22,8 @@
     "defaultSection": "right",
     "defaults": {
       "language": "English",
-      "calendarView": "Day"
+      "calendarView": "Day",
+      "desktopWidget": "Off"
     },
     "schema": [
       {
@@ -44,6 +47,14 @@
         ],
         "defaultValue": "Day",
         "description": "Default activity view. Changes made in the panel are remembered."
+      },
+      {
+        "key": "desktopWidget",
+        "type": "enum",
+        "label": "Desktop widget",
+        "options": ["Off", "On"],
+        "defaultValue": "Off",
+        "description": "Show Niku on workspace 1 of the primary monitor."
       }
     ]
   }

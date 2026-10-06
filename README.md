@@ -1,7 +1,8 @@
 # Niku Calendar for Omarchy
 
 An independent Omarchy bar plugin for creating and editing recurring activities,
-opening class notes and links, importing CSV schedules, and receiving reminders.
+opening class notes and links, importing CSV schedules, receiving reminders,
+and optionally viewing Canvas assignments and a desktop glance widget.
 It does not replace or modify the built-in clock or other calendar widgets.
 
 > Keep your plans close and your paws ready. (=^･ω･^=)
@@ -28,7 +29,9 @@ It does not replace or modify the built-in clock or other calendar widgets.
 - Comma, semicolon, and tab delimiter detection.
 - Spanish and English column aliases.
 - UTF-8 and Latin-1 input support.
-- Local-only processing with no network requests or third-party Python packages.
+- Optional, read-only Canvas connection with a private offline cache.
+- Desktop widget on workspace 1 of the primary monitor, disabled by default.
+- No third-party Python packages.
 
 ## Requirements
 
@@ -38,8 +41,8 @@ It does not replace or modify the built-in clock or other calendar widgets.
   path can still be entered manually when either command is unavailable.
 - The built-in Omarchy notification service for ten-minute activity reminders.
 
-The plugin requires no elevated privileges, package manager, background daemon,
-or network access.
+The local schedule requires no elevated privileges, package manager, background
+daemon, or network access. Canvas synchronization needs an Internet connection.
 
 ## Install
 
@@ -100,10 +103,57 @@ contain that date. Use `last` to run an activity on every month's final day.
 1. Click the calendar icon in the Omarchy bar.
 2. Choose **Add activity** to create an activity manually.
 3. Use **Manage activities** to inspect, edit, or delete complete recurring series.
-4. Switch between **Day** and **Week**. The weekly view covers Monday through
-   Sunday and groups activities by day.
+4. Switch between **Day** and **Week** for local activities. The weekly view
+   covers Monday through Sunday and groups activities by day. Open **Canvas**
+   for upcoming deliveries with their local due date, time and time remaining.
 5. Select an activity occurrence to open its notes, links, and editing actions.
 6. Use the pencil beside the heading to rename the schedule.
+7. Optionally enable the desktop widget with the small eye icon at the top left
+   of the panel. It appears only when
+   the primary monitor displays workspace 1 and hides on other workspaces.
+   Click and drag the card to move it; its position is saved in
+   `~/.local/state/omarchy/niku-desktop.json` and restored after a restart.
+
+### Canvas (optional)
+
+Canvas is read-only and does not write to `schedule.json`. Open the **Canvas**
+tab, enter the address of your Canvas site and paste your personal access
+token into the hidden field, then select **Save and sync**. The setup form
+appears automatically when there is no saved token; use the gear icon in that
+tab to change the address or token later. Leaving the token field empty keeps
+the existing token. Niku saves new tokens to
+`~/.config/niku/canvas-token` (permissions `0600`) and configuration to
+`~/.config/niku/canvas.json` (permissions `0600`). Existing token files
+referenced by the configuration continue to work and are not modified unless
+you enter a replacement token.
+
+You can also configure Canvas manually by creating `~/.config/niku/canvas.json`:
+
+```json
+{
+  "baseUrl": "https://canvas.example.edu",
+  "tokenFile": "~/.config/niku/canvas-token"
+}
+```
+
+Use your own Canvas URL; it must be an HTTPS origin (no `/api/v1` suffix).
+Do not add the token to the JSON file or this repository. Niku checks Canvas
+every 15 minutes while the bar is running; use the refresh button in the panel
+to sync immediately. It reads active courses and planner assignments, ignores
+completed deliveries, and shows deadlines in local time. Not all Canvas items
+have due dates, so undated items are not shown. Canvas may also impose
+restrictions on which courses and assignments your token can read.
+
+The cache is `~/.cache/niku/canvas.json` and is used offline; it contains
+course and assignment names, dates and links, but never the token. Remove the
+Canvas config file to disable the integration without affecting the schedule.
+The widget can also be enabled from the terminal:
+
+```bash
+omarchy bar set io.github.javihuh.schedule desktopWidget On
+```
+
+Set the same option to `Off` to hide it.
 
 The editor accepts dates as `YYYY-MM-DD` and times as 24-hour `HH:MM` values.
 Weekly and biweekly activities use a weekday; monthly activities can use a day
@@ -177,9 +227,9 @@ Sent reminder occurrences are tracked in
 `~/.local/state/omarchy/recurring-schedule/reminders.json` so shell reloads and
 multiple monitors do not create duplicate notifications.
 
-No schedule content is transmitted by the plugin. It only reads a selected CSV
-and writes normalized local state. Saved links are validated as HTTP(S) URLs
-and open in the default browser only after an explicit click.
+No local schedule content is transmitted by the plugin. Canvas requests use
+only the account token and are read-only. Saved links are validated as HTTP(S)
+URLs and open in the default browser only after an explicit click.
 
 ## Remove
 
@@ -216,6 +266,7 @@ python3 schedule.py preview examples/schedule.csv
 python3 schedule.py import examples/schedule.csv
 python3 schedule.py status
 python3 schedule.py remind
+python3 canvas.py
 ```
 
 Backend messages default to English. Pass `--language es` before the command

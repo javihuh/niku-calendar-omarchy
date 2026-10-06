@@ -16,6 +16,7 @@ Panel {
   readonly property var barIdentity: hostWidget || root
 
   readonly property string helperPath: Qt.resolvedUrl("schedule.py").toString().replace(/^file:\/\//, "")
+  readonly property string canvasPath: Qt.resolvedUrl("canvas.py").toString().replace(/^file:\/\//, "")
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string languageCode: I18n.languageCode(setting("language", "English"))
@@ -38,6 +39,7 @@ Panel {
   readonly property string scheduleTitle: String(scheduleStatus.title || "Schedule")
   readonly property string periodView: String(setting("calendarView", "Day")).toLowerCase() === "week"
     ? "week" : "day"
+  property var canvasStatus: ({ configured: false, assignments: [], courses: {} })
 
   property string viewMode: "main"
   property string selectedActivityId: ""
@@ -49,6 +51,7 @@ Panel {
   property string notice: ""
   property bool noticeIsError: false
   property bool refreshQueued: false
+  property bool canvasRefreshQueued: false
   property bool reminderQueued: false
   property bool componentReady: false
   property int languageRevision: 0
@@ -290,6 +293,35 @@ Panel {
     statusProc.running = true
   }
 
+  function refreshCanvas(force) {
+    if (canvasProc.running) {
+      if (force) canvasRefreshQueued = true
+      return
+    }
+    canvasProc.command = ["python3", canvasPath].concat(force ? ["--refresh"] : [])
+    canvasProc.running = true
+  }
+
+  function refreshCanvasSettings() {
+    if (canvasSettingsProc.running) return
+    canvasSettingsProc.command = ["python3", canvasPath, "--settings"]
+    canvasSettingsProc.running = true
+  }
+
+  function configureCanvas(baseUrl, token) {
+    if (canvasConfigureProc.running) return
+    mainView.canvasSetupError = ""
+    mainView.canvasSaving = true
+    canvasConfigureProc.payload = JSON.stringify({ baseUrl: baseUrl, token: token })
+    mainView.clearCanvasToken()
+    canvasConfigureProc.command = ["python3", canvasPath, "--configure"]
+    canvasConfigureProc.running = true
+  }
+
+  function toggleDesktop() {
+    persistSettings({ desktopWidget: setting("desktopWidget", "Off") === "On" ? "Off" : "On" })
+  }
+
   function checkReminders() {
     if (reminderProc.running) {
       reminderQueued = true
@@ -483,12 +515,15 @@ Panel {
     viewMode = "main"
     mainView.renameActive = false
     refresh()
+    refreshCanvas(false)
+    refreshCanvasSettings()
     controller.show()
   }
 
   function close() {
     deleteDialog.opened = false
     mainView.renameActive = false
+    mainView.clearCanvasToken()
     controller.hide()
   }
 
@@ -506,6 +541,8 @@ Panel {
   Component.onCompleted: Qt.callLater(function() {
     componentReady = true
     refresh()
+    refreshCanvas(false)
+    refreshCanvasSettings()
     checkReminders()
   })
 
@@ -516,6 +553,63 @@ Panel {
     onTriggered: {
       root.refresh()
       root.checkReminders()
+    }
+  }
+
+  Timer {
+    interval: 900000
+    repeat: true
+    running: true
+    onTriggered: root.refreshCanvas(false)
+  }
+
+  Process {
+    id: canvasProc
+    stdout: StdioCollector { id: canvasOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var result = root.parsedOutput(canvasOut.text)
+      if (exitCode === 0 && result && result.assignments)
+        root.canvasStatus = result
+      if (root.canvasRefreshQueued) {
+        root.canvasRefreshQueued = false
+        Qt.callLater(function() { root.refreshCanvas(true) })
+      }
+    }
+  }
+
+  Process {
+    id: canvasSettingsProc
+    stdout: StdioCollector { id: canvasSettingsOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var result = root.parsedOutput(canvasSettingsOut.text)
+      if (exitCode !== 0 || !result || mainView.canvasSaving) return
+      mainView.canvasHasToken = result.hasToken === true
+      if (!mainView.canvasUrlActive) mainView.canvasBaseUrl = String(result.baseUrl || "")
+    }
+  }
+
+  Process {
+    id: canvasConfigureProc
+    property string payload: ""
+    stdout: StdioCollector { id: canvasConfigureOut; waitForEnd: true }
+    onStarted: {
+      write(payload + "\n")
+      payload = ""
+    }
+    onExited: function(exitCode) {
+      mainView.canvasSaving = false
+      var result = root.parsedOutput(canvasConfigureOut.text)
+      if (exitCode === 0 && result && result.ok === true) {
+        mainView.canvasBaseUrl = String(result.baseUrl || "")
+        mainView.canvasHasToken = true
+        mainView.canvasSetupOpen = false
+        mainView.canvasSetupError = ""
+        mainView.focusReleaseRequested()
+        root.refreshCanvasSettings()
+        root.refreshCanvas(true)
+      } else {
+        mainView.canvasSetupError = mainView.canvasErrorText(result ? result.error : "save_failed")
+      }
     }
   }
 
@@ -751,6 +845,8 @@ Panel {
         anchors.fill: parent
         visible: root.viewMode === "main"
         scheduleStatus: root.scheduleStatus
+        canvasStatus: root.canvasStatus
+        desktopEnabled: root.setting("desktopWidget", "Off") === "On"
         languageCode: root.languageCode
         periodView: root.periodView
         previewData: root.previewData
@@ -770,6 +866,9 @@ Panel {
         onChooseRequested: root.chooseCsv()
         onPreviewRequested: root.previewCsv()
         onImportRequested: root.importCsv()
+        onDesktopToggleRequested: root.toggleDesktop()
+        onCanvasRefreshRequested: root.refreshCanvas(true)
+        onCanvasConfigureRequested: function(baseUrl, token) { root.configureCanvas(baseUrl, token) }
         onPathEdited: {
           root.previewData = null
           root.clearNotice()

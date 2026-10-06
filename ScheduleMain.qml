@@ -3,13 +3,23 @@ import qs.Commons
 import qs.Ui
 import "I18n.js" as I18n
 import "ScheduleView.js" as ScheduleView
+import "NikuData.js" as NikuData
 
 Item {
   id: root
 
   property var scheduleStatus: ({})
+  property var canvasStatus: ({ assignments: [] })
+  property bool desktopEnabled: false
+  property date currentTime: new Date()
   property string languageCode: "en"
   property string periodView: "day"
+  property bool canvasView: false
+  property bool canvasSetupOpen: false
+  property bool canvasHasToken: false
+  property bool canvasSaving: false
+  property string canvasBaseUrl: ""
+  property string canvasSetupError: ""
   property var previewData: null
   property string csvPath: ""
   property string notice: ""
@@ -27,15 +37,19 @@ Item {
   readonly property string referenceDate: String(scheduleStatus.referenceDate || "")
   readonly property string weekStart: String(scheduleStatus.weekStart || "")
   readonly property string weekEnd: String(scheduleStatus.weekEnd || "")
+  readonly property var pendingAssignments: NikuData.pending(canvasStatus.assignments, currentTime)
+  readonly property var timelineEvents: scheduleStatus.events || []
   readonly property var periodEvents: ScheduleView.eventsForView(
-    scheduleStatus.events || [], periodView, referenceDate, weekStart, weekEnd)
+    timelineEvents, periodView, referenceDate, weekStart, weekEnd)
   readonly property var eventGroups: ScheduleView.groupsForView(
-    scheduleStatus.events || [], periodView, referenceDate, weekStart, weekEnd)
+    timelineEvents, periodView, referenceDate, weekStart, weekEnd)
   readonly property var previewItems: previewData && previewData.items ? previewData.items : []
   readonly property var previewErrors: previewData && previewData.errors ? previewData.errors : []
   readonly property var previewWarnings: previewData && previewData.warnings ? previewData.warnings : []
   readonly property bool previewReady: previewData && previewData.ok === true
+  readonly property bool canvasUrlActive: canvasUrlField.activeFocus
   readonly property bool inputActive: renameField.activeFocus || pathField.activeFocus
+    || (canvasView && (canvasUrlField.activeFocus || canvasTokenField.activeFocus))
 
   signal renameRequested(string title)
   signal addRequested()
@@ -45,6 +59,9 @@ Item {
   signal chooseRequested()
   signal previewRequested()
   signal importRequested()
+  signal desktopToggleRequested()
+  signal canvasRefreshRequested()
+  signal canvasConfigureRequested(string baseUrl, string token)
   signal pathEdited()
   signal focusReleaseRequested()
 
@@ -59,6 +76,19 @@ Item {
 
   function recurrenceLabel(item) {
     return I18n.recurrenceLabel(languageCode, item.recurrence).toLowerCase()
+  }
+
+  function clearCanvasToken() { canvasTokenField.text = "" }
+
+  onCanvasBaseUrlChanged: if (!canvasUrlField.activeFocus) canvasUrlField.text = canvasBaseUrl
+  onCanvasSetupOpenChanged: if (!canvasSetupOpen && canvasHasToken) clearCanvasToken()
+
+  function canvasErrorText(code) {
+    var spanish = languageCode === "es"
+    if (code === "invalid_url") return spanish ? "Ingresa solo el dominio HTTPS de Canvas." : "Enter the HTTPS Canvas domain only."
+    if (code === "missing_token" || code === "invalid_token")
+      return spanish ? "Ingresa un token de Canvas válido." : "Enter a valid Canvas token."
+    return spanish ? "No se pudo guardar la configuración de Canvas." : "Could not save Canvas settings."
   }
 
   function startRename() {
@@ -84,6 +114,13 @@ Item {
     focusReleaseRequested()
   }
 
+  Timer {
+    interval: 30000
+    running: true
+    repeat: true
+    onTriggered: root.currentTime = new Date()
+  }
+
   Flickable {
     id: mainScroll
     anchors.fill: parent
@@ -102,10 +139,25 @@ Item {
         width: parent.width
         implicitHeight: Math.max(heroIcon.implicitHeight, heroText.implicitHeight, heroCount.implicitHeight)
 
+        PanelActionButton {
+          id: desktopAction
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: root.desktopEnabled ? "\uf070" : "\uf06e"
+          tooltipText: root.desktopEnabled
+            ? (root.languageCode === "es" ? "Ocultar widget de escritorio" : "Hide desktop widget")
+            : (root.languageCode === "es" ? "Mostrar widget de escritorio" : "Show desktop widget")
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          focusable: true
+          onClicked: root.desktopToggleRequested()
+        }
+
         Text {
           id: heroIcon
           textFormat: Text.PlainText
-          anchors.left: parent.left
+          anchors.left: desktopAction.right
+          anchors.leftMargin: Style.spacing.md
           anchors.verticalCenter: parent.verticalCenter
           text: "\uDB80\uDD1B"
           color: root.foreground
@@ -197,6 +249,7 @@ Item {
       PanelSeparator { foreground: root.foreground }
 
       Button {
+        visible: !root.canvasView
         width: parent.width
         text: I18n.t(root.languageCode, "common.addActivity")
         iconText: "\uf067"
@@ -210,6 +263,7 @@ Item {
       }
 
       Button {
+        visible: !root.canvasView
         width: parent.width
         text: I18n.t(root.languageCode, "main.manage")
         iconText: "\uf03a"
@@ -223,34 +277,53 @@ Item {
 
       Row {
         width: parent.width
-        spacing: Style.spacing.lg
+        spacing: Style.spacing.md
 
         Button {
-          width: (parent.width - parent.spacing) / 2
+          width: (parent.width - parent.spacing * 2) / 3
           text: I18n.t(root.languageCode, "main.viewDay")
           foreground: root.foreground
           fontFamily: root.fontFamily
           bordered: true
-          active: root.periodView === "day"
+          active: !root.canvasView && root.periodView === "day"
           focusable: true
           enabled: !root.busy
-          onClicked: root.periodViewRequested("day")
+          onClicked: {
+            root.canvasView = false
+            root.periodViewRequested("day")
+          }
         }
 
         Button {
-          width: (parent.width - parent.spacing) / 2
+          width: (parent.width - parent.spacing * 2) / 3
           text: I18n.t(root.languageCode, "main.viewWeek")
           foreground: root.foreground
           fontFamily: root.fontFamily
           bordered: true
-          active: root.periodView === "week"
+          active: !root.canvasView && root.periodView === "week"
           focusable: true
           enabled: !root.busy
-          onClicked: root.periodViewRequested("week")
+          onClicked: {
+            root.canvasView = false
+            root.periodViewRequested("week")
+          }
+        }
+
+        Button {
+          width: (parent.width - parent.spacing * 2) / 3
+          text: "Canvas"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          bordered: true
+          active: root.canvasView
+          focusable: true
+          enabled: !root.busy
+          onClicked: root.canvasView = true
         }
       }
 
       PanelSectionHeader {
+        visible: !root.canvasView
         text: root.periodView === "week"
           ? I18n.t(root.languageCode, "main.weekActivities")
           : I18n.t(root.languageCode, "main.todayActivities")
@@ -260,7 +333,7 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: root.configured && root.periodView === "day"
+        visible: !root.canvasView && root.configured && root.periodView === "day"
           && root.periodEvents.length > 0
         width: parent.width
         text: I18n.dailyEncouragement(root.languageCode, root.referenceDate)
@@ -274,7 +347,7 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: !root.configured
+        visible: !root.canvasView && !root.configured && root.periodEvents.length === 0
         width: parent.width
         text: I18n.t(root.languageCode, "main.empty")
         wrapMode: Text.WordWrap
@@ -285,7 +358,7 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: root.configured && root.periodEvents.length === 0
+        visible: !root.canvasView && root.periodEvents.length === 0 && root.configured
         width: parent.width
         text: root.periodView === "week"
           ? I18n.t(root.languageCode, "main.noWeek")
@@ -297,7 +370,7 @@ Item {
       }
 
       Column {
-        visible: root.eventGroups.length > 0
+        visible: !root.canvasView && root.eventGroups.length > 0
         width: parent.width
         spacing: Style.space(12)
 
@@ -375,7 +448,8 @@ Item {
                       width: parent.width - eventDate.width - parent.spacing
                         - (eventStatus.visible
                           ? eventStatus.implicitWidth + parent.spacing : 0)
-                      text: String(eventCard.modelData.title || "")
+                      text: (eventCard.modelData.source === "canvas" ? "◈ " : "")
+                        + String(eventCard.modelData.title || "")
                       elide: Text.ElideRight
                       color: eventCard.occurred ? Color.muted : root.foreground
                       font.family: root.fontFamily
@@ -403,8 +477,8 @@ Item {
                   Text {
                     textFormat: Text.PlainText
                     width: parent.width
-                    text: String(eventCard.modelData.startTime || "") + " - "
-                      + String(eventCard.modelData.endTime || "")
+                    text: String(eventCard.modelData.startTime || "")
+                      + (eventCard.modelData.endTime ? " - " + eventCard.modelData.endTime : "")
                       + (eventCard.modelData.location
                         ? " · " + String(eventCard.modelData.location) : "")
                     elide: Text.ElideRight
@@ -422,8 +496,11 @@ Item {
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   enabled: !root.busy
-                  onClicked: root.activityRequested(
-                    String(eventCard.modelData.activityId || ""))
+                  onClicked: {
+                    if (eventCard.modelData.source === "canvas") {
+                      if (eventCard.modelData.url) Qt.openUrlExternally(eventCard.modelData.url)
+                    } else root.activityRequested(String(eventCard.modelData.activityId || ""))
+                  }
                 }
               }
             }
@@ -431,15 +508,215 @@ Item {
         }
       }
 
-      PanelSeparator { foreground: root.foreground }
+      Column {
+        visible: root.canvasView
+        width: parent.width
+        spacing: Style.space(10)
+
+        Row {
+          width: parent.width
+          spacing: Style.spacing.md
+          PanelSectionHeader {
+            width: parent.width - canvasRefresh.width - canvasSetupAction.width - parent.spacing * 2
+            text: root.languageCode === "es" ? "Próximas entregas" : "Upcoming assignments"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+          PanelActionButton {
+            id: canvasSetupAction
+            iconText: "\uf013"
+            tooltipText: root.languageCode === "es" ? "Configurar Canvas" : "Set up Canvas"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.canvasSetupOpen = !root.canvasSetupOpen
+          }
+          PanelActionButton {
+            id: canvasRefresh
+            iconText: "\uf021"
+            tooltipText: root.languageCode === "es" ? "Actualizar Canvas" : "Refresh Canvas"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.canvasRefreshRequested()
+          }
+        }
+
+        Column {
+          visible: root.canvasSetupOpen || !root.canvasHasToken
+          width: parent.width
+          spacing: Style.spacing.md
+
+          Text {
+            textFormat: Text.PlainText
+            text: root.languageCode === "es" ? "Dirección de Canvas" : "Canvas address"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          TextField {
+            id: canvasUrlField
+            width: parent.width
+            text: root.canvasBaseUrl
+            placeholderText: "https://canvas.example.edu"
+            foreground: root.foreground
+            font.family: root.fontFamily
+            enabled: !root.canvasSaving
+            activeFocusOnTab: false
+            onTextEdited: root.canvasBaseUrl = text
+            onActiveFocusChanged: if (!activeFocus) text = root.canvasBaseUrl
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            text: root.languageCode === "es" ? "Token de acceso" : "Access token"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          TextField {
+            id: canvasTokenField
+            width: parent.width
+            password: true
+            placeholderText: root.canvasHasToken
+              ? (root.languageCode === "es" ? "Vacío para mantener el token" : "Leave blank to keep your token")
+              : (root.languageCode === "es" ? "Pega tu token aquí" : "Paste your token here")
+            foreground: root.foreground
+            font.family: root.fontFamily
+            enabled: !root.canvasSaving
+            activeFocusOnTab: false
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            visible: root.canvasSetupError !== ""
+            width: parent.width
+            text: root.canvasSetupError
+            wrapMode: Text.WordWrap
+            color: Color.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Button {
+            width: parent.width
+            text: root.canvasSaving
+              ? (root.languageCode === "es" ? "Guardando..." : "Saving...")
+              : (root.languageCode === "es" ? "Guardar y sincronizar" : "Save and sync")
+            iconText: "\uf0c7"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            bordered: true
+            enabled: !root.canvasSaving && root.canvasBaseUrl.trim() !== ""
+              && (root.canvasHasToken || canvasTokenField.text.trim() !== "")
+            onClicked: root.canvasConfigureRequested(root.canvasBaseUrl, canvasTokenField.text)
+          }
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          visible: !root.canvasStatus.configured || root.canvasStatus.stale === true
+            || root.canvasStatus.ok === false
+          width: parent.width
+          text: !root.canvasStatus.configured
+            ? (root.languageCode === "es" ? "Configura Canvas para ver entregas." : "Configure Canvas to see assignments.")
+            : (root.languageCode === "es" ? "Datos de Canvas sin conexión; se muestra la caché."
+                : "Canvas is offline; showing cached data.")
+          color: Qt.darker(root.foreground, 1.35)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          visible: root.canvasStatus.configured && root.pendingAssignments.length === 0
+          text: root.languageCode === "es" ? "Sin entregas próximas" : "No upcoming assignments"
+          color: Qt.darker(root.foreground, 1.35)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Repeater {
+          model: root.pendingAssignments
+          Rectangle {
+            required property var modelData
+            width: mainContent.width
+            implicitHeight: assignmentContent.implicitHeight + Style.space(16)
+            radius: Style.cornerRadius
+            color: assignmentMouse.containsMouse
+              ? Style.hoverFillFor(root.foreground, Color.accent)
+              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055)
+
+            Column {
+              id: assignmentContent
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(10)
+              anchors.rightMargin: Style.space(10)
+              spacing: Style.spacing.xs
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                text: String(modelData.title || "")
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.spacing.md
+
+                Text {
+                  width: parent.width - remaining.implicitWidth - parent.spacing
+                  textFormat: Text.PlainText
+                  text: Qt.formatDateTime(new Date(modelData.dueAt), "dd/MM/yyyy  HH:mm")
+                  elide: Text.ElideRight
+                  color: Qt.darker(root.foreground, 1.35)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                Text {
+                  id: remaining
+                  textFormat: Text.PlainText
+                  text: NikuData.remainingLabel(modelData.dueAt, root.currentTime, root.languageCode)
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+              }
+            }
+
+            MouseArea {
+              id: assignmentMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              enabled: !!modelData.url
+              cursorShape: Qt.PointingHandCursor
+              onClicked: Qt.openUrlExternally(modelData.url)
+            }
+          }
+        }
+      }
+
+      PanelSeparator { visible: !root.canvasView; foreground: root.foreground }
 
       PanelSectionHeader {
+        visible: !root.canvasView
         text: I18n.t(root.languageCode, "main.importHeading")
         foreground: root.foreground
         fontFamily: root.fontFamily
       }
 
       Row {
+        visible: !root.canvasView
         width: parent.width
         spacing: Style.spacing.lg
 
@@ -496,7 +773,7 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: root.notice !== ""
+        visible: !root.canvasView && root.notice !== ""
         width: parent.width
         text: root.notice
         wrapMode: Text.WordWrap
@@ -506,7 +783,7 @@ Item {
       }
 
       Repeater {
-        model: root.first(root.previewErrors, 5)
+        model: root.canvasView ? [] : root.first(root.previewErrors, 5)
 
         Text {
           required property var modelData
@@ -524,7 +801,7 @@ Item {
       }
 
       Repeater {
-        model: root.first(root.previewWarnings, 3)
+        model: root.canvasView ? [] : root.first(root.previewWarnings, 3)
 
         Text {
           required property var modelData
@@ -539,7 +816,7 @@ Item {
       }
 
       Column {
-        visible: root.previewItems.length > 0
+        visible: !root.canvasView && root.previewItems.length > 0
         width: parent.width
         spacing: Style.spacing.md
 
@@ -593,7 +870,7 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: root.previewItems.length > 0
+        visible: !root.canvasView && root.previewItems.length > 0
         width: parent.width
         text: I18n.t(root.languageCode, "main.importWarning")
         wrapMode: Text.WordWrap
@@ -603,7 +880,7 @@ Item {
       }
 
       Button {
-        visible: root.previewItems.length > 0
+        visible: !root.canvasView && root.previewItems.length > 0
         width: parent.width
         text: root.importing
           ? I18n.t(root.languageCode, "main.importing")
@@ -621,7 +898,7 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: pathField.activeFocus
+        visible: !root.canvasView && pathField.activeFocus
         width: parent.width
         text: I18n.t(root.languageCode, "main.columns")
         wrapMode: Text.WordWrap

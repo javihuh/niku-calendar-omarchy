@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Io
+import Quickshell
 import qs.Commons
 import qs.Ui
 import "I18n.js" as I18n
@@ -18,6 +19,10 @@ BarWidget {
   readonly property bool popoutSwitchClosing: panelLoader.item
     ? panelLoader.item.popoutSwitchClosing === true
     : false
+  readonly property var scheduleStatus: panelLoader.item ? panelLoader.item.scheduleStatus : ({ events: [] })
+  readonly property var canvasStatus: panelLoader.item ? panelLoader.item.canvasStatus : ({ assignments: [] })
+  readonly property var desktopService: bar && bar.shell && bar.shell.serviceFor
+    ? bar.shell.serviceFor(root.moduleName) : null
 
   function injectPanel() {
     var target = panelLoader.item
@@ -69,6 +74,31 @@ BarWidget {
     }
   }
 
+  Binding {
+    target: root.desktopService
+    property: "enabledSetting"
+    value: root.setting("desktopWidget", "Off") === "On"
+    when: root.desktopService !== null
+  }
+  Binding {
+    target: root.desktopService
+    property: "scheduleStatus"
+    value: root.scheduleStatus
+    when: root.desktopService !== null
+  }
+  Binding {
+    target: root.desktopService
+    property: "canvasStatus"
+    value: root.canvasStatus
+    when: root.desktopService !== null
+  }
+  Binding {
+    target: root.desktopService
+    property: "languageCode"
+    value: root.languageCode
+    when: root.desktopService !== null
+  }
+
   IpcHandler {
     target: "io.github.javihuh.schedule"
 
@@ -85,6 +115,7 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
+    fontSize: 15
     text: "\uDB80\uDD1B"
     active: root.opened
     dimmed: !root.configured
