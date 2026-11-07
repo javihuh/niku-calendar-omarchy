@@ -8,7 +8,20 @@ It does not replace or modify the built-in clock or other calendar widgets.
 
 > Keep your plans close and your paws ready. (=^･ω･^=)
 
-![Niku Calendar panel](preview.png)
+![Niku Calendar week view on the Omarchy desktop](preview.png)
+
+<p align="center">
+  <img src="docs/previews/desktop-compact.png" height="360" alt="Compact desktop widget">
+  <img src="docs/previews/desktop-expanded.png" height="440" alt="Expanded desktop summary">
+</p>
+
+<p align="center">
+  <img src="docs/previews/day-view.jpg" height="360" alt="Day view">
+  <img src="docs/previews/week-list.png" height="360" alt="Week list view">
+  <img src="docs/previews/week-calendar.png" height="360" alt="Week calendar view">
+</p>
+
+<sub>Previews use fictional sample activities.</sub>
 
 ## Features
 
