@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Io
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "I18n.js" as I18n
 
@@ -23,6 +24,9 @@ BarWidget {
   readonly property var canvasStatus: panelLoader.item ? panelLoader.item.canvasStatus : ({ assignments: [] })
   readonly property var desktopService: bar && bar.shell && bar.shell.serviceFor
     ? bar.shell.serviceFor(root.moduleName) : null
+  readonly property bool ownsDesktop: desktopService !== null && button.QsWindow.window !== null
+    && button.QsWindow.window.screen !== null
+    && button.QsWindow.window.screen.name === desktopService.desktopScreenName
 
   function injectPanel() {
     var target = panelLoader.item
@@ -78,25 +82,59 @@ BarWidget {
     target: root.desktopService
     property: "enabledSetting"
     value: root.setting("desktopWidget", "Off") === "On"
-    when: root.desktopService !== null
+    when: root.ownsDesktop
   }
   Binding {
     target: root.desktopService
     property: "scheduleStatus"
     value: root.scheduleStatus
-    when: root.desktopService !== null
+    when: root.ownsDesktop
   }
   Binding {
     target: root.desktopService
     property: "canvasStatus"
     value: root.canvasStatus
-    when: root.desktopService !== null
+    when: root.ownsDesktop
   }
   Binding {
     target: root.desktopService
     property: "languageCode"
     value: root.languageCode
-    when: root.desktopService !== null
+    when: root.ownsDesktop
+  }
+
+  Binding {
+    target: root.desktopService
+    property: "compactSetting"
+    value: root.setting("desktopLayout", "Expanded") === "Compact"
+    when: root.ownsDesktop
+  }
+
+  Binding {
+    target: root.desktopService
+    property: "foreground"
+    value: root.bar ? root.bar.foreground : Commons.Color.bar.text
+    when: root.ownsDesktop
+  }
+
+  Connections {
+    target: root.desktopService
+    enabled: root.ownsDesktop
+    function onCompactRequested(compact) {
+      if (panelLoader.item) panelLoader.item.persistSettings({ desktopLayout: compact ? "Compact" : "Expanded" })
+    }
+    function onActivityRequested(activityId) {
+      if (panelLoader.item) panelLoader.item.openDesktopActivity(activityId)
+    }
+    function onCalendarRequested() {
+      if (panelLoader.item) panelLoader.item.openDesktopCalendar()
+    }
+    function onAcademicRequested() {
+      if (panelLoader.item) panelLoader.item.openDesktopAcademic()
+    }
+    function onWidgetVisibleChanged() {
+      if (root.desktopService.widgetVisible) root.refresh()
+    }
   }
 
   IpcHandler {

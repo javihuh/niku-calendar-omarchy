@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "I18n.js" as I18n
 import "ScheduleView.js" as ScheduleView
@@ -14,6 +15,12 @@ Item {
   property date currentTime: new Date()
   property string languageCode: "en"
   property string periodView: "day"
+  property string weekLayout: "list"
+  property bool showCanvasCalendar: false
+  property var canvasCalendarEvents: []
+  property bool panelOpen: false
+  property bool importOpen: false
+  readonly property bool calendarVisible: !canvasView && periodView === "week" && weekLayout === "calendar"
   property bool canvasView: false
   property bool canvasSetupOpen: false
   property bool canvasHasToken: false
@@ -28,7 +35,7 @@ Item {
   property bool previewing: false
   property bool importing: false
   property bool busy: false
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
   property bool renameActive: false
 
@@ -38,23 +45,28 @@ Item {
   readonly property string weekStart: String(scheduleStatus.weekStart || "")
   readonly property string weekEnd: String(scheduleStatus.weekEnd || "")
   readonly property var pendingAssignments: NikuData.pending(canvasStatus.assignments, currentTime)
-  readonly property var timelineEvents: scheduleStatus.events || []
+  readonly property var timelineEvents: (scheduleStatus.events || []).concat(showCanvasCalendar
+    ? ScheduleView.canvasEvents(canvasStatus.assignments, canvasCalendarEvents) : []).sort(function(a, b) {
+      return (a.date + a.startTime).localeCompare(b.date + b.startTime)
+    })
   readonly property var periodEvents: ScheduleView.eventsForView(
     timelineEvents, periodView, referenceDate, weekStart, weekEnd)
-  readonly property var eventGroups: ScheduleView.groupsForView(
-    timelineEvents, periodView, referenceDate, weekStart, weekEnd)
+  readonly property var eventGroups: ScheduleView.groupEvents(periodEvents)
   readonly property var previewItems: previewData && previewData.items ? previewData.items : []
   readonly property var previewErrors: previewData && previewData.errors ? previewData.errors : []
   readonly property var previewWarnings: previewData && previewData.warnings ? previewData.warnings : []
   readonly property bool previewReady: previewData && previewData.ok === true
   readonly property bool canvasUrlActive: canvasUrlField.activeFocus
-  readonly property bool inputActive: renameField.activeFocus || pathField.activeFocus
+  readonly property bool inputActive: renameField.activeFocus || (importOpen && pathField.activeFocus)
+    || (academicLoader.item && academicLoader.item.inputActive)
     || (canvasView && (canvasUrlField.activeFocus || canvasTokenField.activeFocus))
 
   signal renameRequested(string title)
   signal addRequested()
   signal manageRequested()
   signal periodViewRequested(string value)
+  signal weekLayoutRequested(string value)
+  signal canvasCalendarToggleRequested()
   signal activityRequested(string activityId)
   signal chooseRequested()
   signal previewRequested()
@@ -79,6 +91,13 @@ Item {
   }
 
   function clearCanvasToken() { canvasTokenField.text = "" }
+  onPanelOpenChanged: if (panelOpen) currentTime = new Date()
+  onCanvasViewChanged: mainScroll.contentY = 0
+  onWeekLayoutChanged: mainScroll.contentY = 0
+  onPeriodViewChanged: mainScroll.contentY = 0
+  onImportOpenChanged: if (importOpen) Qt.callLater(function() {
+    mainScroll.contentY = Math.min(Math.max(0, mainScroll.contentHeight - mainScroll.height), importSection.y)
+  })
 
   onCanvasBaseUrlChanged: if (!canvasUrlField.activeFocus) canvasUrlField.text = canvasBaseUrl
   onCanvasSetupOpenChanged: if (!canvasSetupOpen && canvasHasToken) clearCanvasToken()
@@ -116,7 +135,7 @@ Item {
 
   Timer {
     interval: 30000
-    running: true
+    running: root.panelOpen
     repeat: true
     onTriggered: root.currentTime = new Date()
   }
@@ -133,7 +152,7 @@ Item {
     Column {
       id: mainContent
       width: mainScroll.width
-      spacing: Style.space(12)
+      spacing: Style.space(16)
 
       Item {
         width: parent.width
@@ -232,25 +251,68 @@ Item {
           onClicked: root.renameActive ? root.commitRename() : root.startRename()
         }
 
-        Text {
+        Rectangle {
           id: heroCount
-          textFormat: Text.PlainText
-          anchors.right: parent.right
+          anchors.right: headerActions.left
+          anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
-          text: root.todayCount
-          color: root.foreground
-          opacity: root.configured ? 1 : 0.35
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.displayLarge
-          font.bold: true
+          implicitWidth: todayLabel.implicitWidth + Style.space(16)
+          implicitHeight: Style.space(30)
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+          Text {
+            id: todayLabel
+            anchors.centerIn: parent
+            textFormat: Text.PlainText
+            text: root.todayCount + (root.languageCode === "es" ? " hoy" : " today")
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
         }
+      Row {
+        id: headerActions
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(10)
+        Button {
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Canvas"
+          iconText: "\uf19d"
+          tooltipText: root.languageCode === "es" ? "Panel académico · Canvas" : "Academic panel · Canvas"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          active: root.canvasView
+          bordered: true
+          focusable: true
+          onClicked: root.canvasView = !root.canvasView
+        }
+        PanelActionButton {
+          visible: !root.canvasView
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "\uf093"
+          size: Style.space(32)
+          bordered: true
+          focusable: true
+          tooltipText: I18n.t(root.languageCode, "main.importHeading")
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.importOpen = !root.importOpen
+        }
+      }
       }
 
       PanelSeparator { foreground: root.foreground }
 
-      Button {
+      Row {
         visible: !root.canvasView
         width: parent.width
+        spacing: Style.space(12)
+      Button {
+        visible: !root.canvasView
+        width: (parent.width - parent.spacing) / 2
         text: I18n.t(root.languageCode, "common.addActivity")
         iconText: "\uf067"
         foreground: root.foreground
@@ -264,68 +326,107 @@ Item {
 
       Button {
         visible: !root.canvasView
-        width: parent.width
+        width: (parent.width - parent.spacing) / 2
         text: I18n.t(root.languageCode, "main.manage")
         iconText: "\uf03a"
         foreground: root.foreground
         fontFamily: root.fontFamily
-        bordered: true
+        bordered: false
         enabled: !root.busy
         opacity: enabled ? 1 : 0.45
         onClicked: root.manageRequested()
       }
+      }
 
-      Row {
+      Column {
+        visible: !root.canvasView
         width: parent.width
-        spacing: Style.spacing.md
+        spacing: Style.space(12)
 
-        Button {
-          width: (parent.width - parent.spacing * 2) / 3
-          text: I18n.t(root.languageCode, "main.viewDay")
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          bordered: true
-          active: !root.canvasView && root.periodView === "day"
-          focusable: true
-          enabled: !root.busy
-          onClicked: {
-            root.canvasView = false
-            root.periodViewRequested("day")
+        Row {
+          width: parent.width
+          spacing: Style.space(12)
+          Text {
+            width: Style.space(60)
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.languageCode === "es" ? "Vista" : "View"
+            color: root.foreground
+            opacity: 0.65
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+          ViewSelector {
+            width: parent.width - Style.space(72)
+            value: root.periodView
+            options: [
+              { value: "day", label: I18n.t(root.languageCode, "main.viewDay") },
+              { value: "week", label: I18n.t(root.languageCode, "main.viewWeek") }
+            ]
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: !root.busy
+            onChosen: function(value) { root.periodViewRequested(value) }
           }
         }
-
-        Button {
-          width: (parent.width - parent.spacing * 2) / 3
-          text: I18n.t(root.languageCode, "main.viewWeek")
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          bordered: true
-          active: !root.canvasView && root.periodView === "week"
-          focusable: true
-          enabled: !root.busy
-          onClicked: {
-            root.canvasView = false
-            root.periodViewRequested("week")
+        Row {
+          visible: root.periodView === "week"
+          width: parent.width
+          spacing: Style.space(12)
+          Text {
+            width: Style.space(60)
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.languageCode === "es" ? "Diseño" : "Layout"
+            color: root.foreground
+            opacity: 0.65
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+          ViewSelector {
+            width: parent.width - Style.space(72)
+            value: root.weekLayout
+            options: [
+              { value: "list", label: root.languageCode === "es" ? "Lista" : "List", icon: "\uf03a" },
+              { value: "calendar", label: root.languageCode === "es" ? "Calendario" : "Calendar", icon: "\uf073" }
+            ]
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onChosen: function(value) { root.weekLayoutRequested(value) }
           }
         }
-
-        Button {
-          width: (parent.width - parent.spacing * 2) / 3
-          text: "Canvas"
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          bordered: true
-          active: root.canvasView
-          focusable: true
-          enabled: !root.busy
-          onClicked: root.canvasView = true
+        Item {
+          visible: root.periodView === "week"
+          width: parent.width
+          implicitHeight: canvasToggle.implicitHeight
+          Text {
+            anchors.left: parent.left
+            anchors.right: canvasToggle.left
+            anchors.rightMargin: Style.space(12)
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.languageCode === "es" ? "Entregas y eventos de Canvas" : "Canvas deadlines and events"
+            color: root.foreground
+            opacity: 0.8
+            elide: Text.ElideRight
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+          ToggleSwitch {
+            id: canvasToggle
+            anchors.right: parent.right
+            checked: root.showCanvasCalendar
+            foreground: root.foreground
+            onToggled: root.canvasCalendarToggleRequested()
+          }
         }
       }
 
       PanelSectionHeader {
         visible: !root.canvasView
         text: root.periodView === "week"
-          ? I18n.t(root.languageCode, "main.weekActivities")
+          ? I18n.t(root.languageCode, "main.weekActivities") + " · "
+            + I18n.shortDate(root.languageCode, root.weekStart) + " – " + I18n.shortDate(root.languageCode, root.weekEnd)
           : I18n.t(root.languageCode, "main.todayActivities")
         foreground: root.foreground
         fontFamily: root.fontFamily
@@ -370,12 +471,12 @@ Item {
       }
 
       Column {
-        visible: !root.canvasView && root.eventGroups.length > 0
+        visible: !root.canvasView && !root.calendarVisible && root.eventGroups.length > 0
         width: parent.width
         spacing: Style.space(12)
 
         Repeater {
-          model: root.eventGroups
+          model: root.panelOpen && !root.canvasView && !root.calendarVisible ? root.eventGroups : []
 
           Column {
             id: dayGroup
@@ -397,25 +498,24 @@ Item {
               Rectangle {
                 id: eventCard
                 required property var modelData
-                readonly property string temporalState: String(modelData.state
-                  || (modelData.active === true ? "active" : "upcoming"))
+                readonly property string temporalState: ScheduleView.temporalState(modelData, root.currentTime)
                 readonly property bool activeNow: temporalState === "active"
                 readonly property bool occurred: temporalState === "occurred"
                 width: dayGroup.width
                 implicitHeight: eventContent.implicitHeight + Style.space(14)
                 radius: Style.cornerRadius
                 color: activeNow
-                  ? Style.selectedFillFor(root.foreground, Color.accent)
+                  ? Style.selectedFillFor(root.foreground, Commons.Color.accent)
                   : occurred
                     ? (eventMouse.containsMouse
-                      ? Style.hoverFillFor(Color.muted, Color.muted)
-                      : Style.normalFillFor(Color.muted, Color.muted))
+                      ? Style.hoverFillFor(Commons.Color.muted, Commons.Color.muted)
+                      : Style.normalFillFor(Commons.Color.muted, Commons.Color.muted))
                     : (eventMouse.containsMouse
-                      ? Style.hoverFillFor(root.foreground, Color.accent)
+                      ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
                       : Qt.rgba(root.foreground.r, root.foreground.g,
                           root.foreground.b, 0.055))
                 border.width: activeNow ? Math.max(1, Style.normalBorderWidth) : 0
-                border.color: Style.selectedStateColor(root.foreground, Color.accent)
+                border.color: Style.selectedStateColor(root.foreground, Commons.Color.accent)
 
                 Column {
                   id: eventContent
@@ -436,7 +536,7 @@ Item {
                       width: Style.space(86)
                       text: root.eventDateLabel(eventCard.modelData.date).toUpperCase()
                       color: eventCard.activeNow ? root.foreground
-                        : (eventCard.occurred ? Color.muted
+                        : (eventCard.occurred ? Commons.Color.muted
                           : Qt.darker(root.foreground, 1.35))
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
@@ -451,7 +551,7 @@ Item {
                       text: (eventCard.modelData.source === "canvas" ? "◈ " : "")
                         + String(eventCard.modelData.title || "")
                       elide: Text.ElideRight
-                      color: eventCard.occurred ? Color.muted : root.foreground
+                      color: eventCard.occurred ? Commons.Color.muted : root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       font.bold: true
@@ -465,8 +565,8 @@ Item {
                         ? I18n.t(root.languageCode, "main.active")
                         : I18n.t(root.languageCode, "main.occurred"))
                       color: eventCard.activeNow
-                        ? Style.selectedStateColor(root.foreground, Color.accent)
-                        : Color.muted
+                        ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
+                        : Commons.Color.muted
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
                       font.bold: true
@@ -483,7 +583,7 @@ Item {
                         ? " · " + String(eventCard.modelData.location) : "")
                     elide: Text.ElideRight
                     color: eventCard.activeNow ? root.foreground
-                      : (eventCard.occurred ? Color.muted
+                      : (eventCard.occurred ? Commons.Color.muted
                         : Qt.darker(root.foreground, 1.45))
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
@@ -508,6 +608,25 @@ Item {
         }
       }
 
+      Loader {
+        active: root.panelOpen && root.calendarVisible
+        visible: active
+        width: parent.width
+        height: active ? Math.max(Style.space(220), root.height - y) : 0
+        sourceComponent: Component {
+          WeekCalendar {
+            events: root.periodEvents
+            weekStart: root.weekStart
+            languageCode: root.languageCode
+            currentTime: root.currentTime
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            busy: root.busy
+            onActivityRequested: function(activityId) { root.activityRequested(activityId) }
+          }
+        }
+      }
+
       Column {
         visible: root.canvasView
         width: parent.width
@@ -517,10 +636,17 @@ Item {
           width: parent.width
           spacing: Style.spacing.md
           PanelSectionHeader {
-            width: parent.width - canvasRefresh.width - canvasSetupAction.width - parent.spacing * 2
-            text: root.languageCode === "es" ? "Próximas entregas" : "Upcoming assignments"
+            width: parent.width - canvasRefresh.width - canvasSetupAction.width - canvasBack.width - parent.spacing * 3
+            text: root.languageCode === "es" ? "Panel académico" : "Academic panel"
             foreground: root.foreground
             fontFamily: root.fontFamily
+          }
+          PanelActionButton {
+            id: canvasBack
+            iconText: "\uf060"
+            tooltipText: root.languageCode === "es" ? "Volver al calendario" : "Back to calendar"
+            foreground: root.foreground; fontFamily: root.fontFamily
+            onClicked: root.canvasView = false
           }
           PanelActionButton {
             id: canvasSetupAction
@@ -536,7 +662,10 @@ Item {
             tooltipText: root.languageCode === "es" ? "Actualizar Canvas" : "Refresh Canvas"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            onClicked: root.canvasRefreshRequested()
+            onClicked: {
+              root.canvasRefreshRequested()
+              if (academicLoader.item) academicLoader.item.refresh()
+            }
           }
         }
 
@@ -593,7 +722,7 @@ Item {
             width: parent.width
             text: root.canvasSetupError
             wrapMode: Text.WordWrap
-            color: Color.urgent
+            color: Commons.Color.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
           }
@@ -627,85 +756,44 @@ Item {
           font.pixelSize: Style.font.bodySmall
         }
 
-        Text {
-          textFormat: Text.PlainText
-          visible: root.canvasStatus.configured && root.pendingAssignments.length === 0
-          text: root.languageCode === "es" ? "Sin entregas próximas" : "No upcoming assignments"
-          color: Qt.darker(root.foreground, 1.35)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-
-        Repeater {
-          model: root.pendingAssignments
-          Rectangle {
-            required property var modelData
-            width: mainContent.width
-            implicitHeight: assignmentContent.implicitHeight + Style.space(16)
-            radius: Style.cornerRadius
-            color: assignmentMouse.containsMouse
-              ? Style.hoverFillFor(root.foreground, Color.accent)
-              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055)
-
-            Column {
-              id: assignmentContent
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.leftMargin: Style.space(10)
-              anchors.rightMargin: Style.space(10)
-              spacing: Style.spacing.xs
-
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width
-                text: String(modelData.title || "")
-                wrapMode: Text.WordWrap
-                maximumLineCount: 2
-                elide: Text.ElideRight
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
+        Loader {
+          id: academicLoader
+          active: root.panelOpen && root.canvasView && root.canvasHasToken && !root.canvasSetupOpen
+          visible: active
+          width: parent.width
+          height: active ? Math.max(Style.space(260), root.height - parent.y - y) : 0
+          sourceComponent: Component {
+            AcademicPanel {
+              languageCode: root.languageCode
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onCalendarRequested: {
+                root.canvasView = false
+                root.periodViewRequested("week")
+                root.weekLayoutRequested("calendar")
+                if (!root.showCanvasCalendar) root.canvasCalendarToggleRequested()
               }
-
-              Row {
-                width: parent.width
-                spacing: Style.spacing.md
-
-                Text {
-                  width: parent.width - remaining.implicitWidth - parent.spacing
-                  textFormat: Text.PlainText
-                  text: Qt.formatDateTime(new Date(modelData.dueAt), "dd/MM/yyyy  HH:mm")
-                  elide: Text.ElideRight
-                  color: Qt.darker(root.foreground, 1.35)
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-
-                Text {
-                  id: remaining
-                  textFormat: Text.PlainText
-                  text: NikuData.remainingLabel(modelData.dueAt, root.currentTime, root.languageCode)
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-              }
-            }
-
-            MouseArea {
-              id: assignmentMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              enabled: !!modelData.url
-              cursorShape: Qt.PointingHandCursor
-              onClicked: Qt.openUrlExternally(modelData.url)
             }
           }
         }
       }
 
+      Text {
+        textFormat: Text.PlainText
+        visible: !root.canvasView && root.notice !== ""
+        width: parent.width
+        text: root.notice
+        wrapMode: Text.WordWrap
+        color: root.noticeIsError ? Commons.Color.urgent : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Column {
+      id: importSection
+      visible: root.importOpen && !root.canvasView
+      width: parent.width
+      spacing: Style.spacing.md
       PanelSeparator { visible: !root.canvasView; foreground: root.foreground }
 
       PanelSectionHeader {
@@ -771,17 +859,6 @@ Item {
         }
       }
 
-      Text {
-        textFormat: Text.PlainText
-        visible: !root.canvasView && root.notice !== ""
-        width: parent.width
-        text: root.notice
-        wrapMode: Text.WordWrap
-        color: root.noticeIsError ? Color.urgent : root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-      }
-
       Repeater {
         model: root.canvasView ? [] : root.first(root.previewErrors, 5)
 
@@ -794,7 +871,7 @@ Item {
             : "")
             + String(modelData.message || "")
           wrapMode: Text.WordWrap
-          color: Color.urgent
+          color: Commons.Color.urgent
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
         }
@@ -874,7 +951,7 @@ Item {
         width: parent.width
         text: I18n.t(root.languageCode, "main.importWarning")
         wrapMode: Text.WordWrap
-        color: Color.urgent
+        color: Commons.Color.urgent
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
       }
@@ -885,7 +962,7 @@ Item {
         text: root.importing
           ? I18n.t(root.languageCode, "main.importing")
           : I18n.t(root.languageCode, "main.importReplace")
-        iconText: root.importing ? "\uf110" : "\uf56f"
+        iconText: root.importing ? "\uf110" : "\uf093"
         iconSpinning: root.importing
         foreground: root.foreground
         fontFamily: root.fontFamily
@@ -905,6 +982,7 @@ Item {
         color: Qt.darker(root.foreground, 1.65)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
+      }
       }
     }
   }

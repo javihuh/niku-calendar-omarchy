@@ -163,7 +163,7 @@ Item {
 
         Repeater {
           id: activityRepeater
-          model: root.items
+          model: root.visible ? root.items : []
 
           Rectangle {
             id: activityRow

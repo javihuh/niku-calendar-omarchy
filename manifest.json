@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.javihuh.schedule",
   "name": "Niku Calendar",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": "javihuh",
   "license": "MIT",
-  "description": "Create and edit recurring activities, attach notes and links, import CSV schedules, and receive reminders.",
+  "description": "Recurring activities, a weekly calendar, reminders, CSV import, and a read-only Canvas academic panel.",
   "kinds": [
     "service",
     "bar-widget"
@@ -23,7 +23,10 @@
     "defaults": {
       "language": "English",
       "calendarView": "Day",
-      "desktopWidget": "Off"
+      "weekLayout": "List",
+      "showCanvasCalendar": "Off",
+      "desktopWidget": "Off",
+      "desktopLayout": "Expanded"
     },
     "schema": [
       {
@@ -47,6 +50,30 @@
         ],
         "defaultValue": "Day",
         "description": "Default activity view. Changes made in the panel are remembered."
+      },
+      {
+        "key": "weekLayout",
+        "type": "enum",
+        "label": "Weekly layout",
+        "options": ["List", "Calendar"],
+        "defaultValue": "List",
+        "description": "Remembered weekly list or hourly calendar grid."
+      },
+      {
+        "key": "showCanvasCalendar",
+        "type": "enum",
+        "label": "Show Canvas in calendar",
+        "options": ["Off", "On"],
+        "defaultValue": "Off",
+        "description": "Include Canvas deadlines and events in the local views."
+      },
+      {
+        "key": "desktopLayout",
+        "type": "enum",
+        "label": "Desktop layout",
+        "options": ["Compact", "Expanded"],
+        "defaultValue": "Expanded",
+        "description": "Show essentials or the full daily and weekly desktop summary."
       },
       {
         "key": "desktopWidget",

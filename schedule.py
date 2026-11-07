@@ -1544,7 +1544,7 @@ def notify_due_classes(
 def status_payload(
     store: dict[str, Any],
     today: date | None = None,
-    days: int = 120,
+    days: int = 7,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     reference_now = local_datetime(now or datetime.now())
@@ -1686,7 +1686,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status = commands.add_parser("status", help=message("cli_status"))
     status.add_argument("--date", help=message("cli_date"))
-    status.add_argument("--days", type=int, default=120)
+    status.add_argument("--days", type=int, default=7)
     commands.add_parser(
         "rename-schedule",
         help=message("cli_rename"),

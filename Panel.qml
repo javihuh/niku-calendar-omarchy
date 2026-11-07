@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "I18n.js" as I18n
 
@@ -17,7 +18,9 @@ Panel {
 
   readonly property string helperPath: Qt.resolvedUrl("schedule.py").toString().replace(/^file:\/\//, "")
   readonly property string canvasPath: Qt.resolvedUrl("canvas.py").toString().replace(/^file:\/\//, "")
-  readonly property color contentForeground: bar ? bar.foreground : Color.foreground
+  readonly property string scheduleStatePath: (Quickshell.env("XDG_STATE_HOME")
+    || Quickshell.env("HOME") + "/.local/state") + "/omarchy/recurring-schedule/schedule.json"
+  readonly property color contentForeground: bar ? bar.foreground : Commons.Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string languageCode: I18n.languageCode(setting("language", "English"))
 
@@ -39,6 +42,12 @@ Panel {
   readonly property string scheduleTitle: String(scheduleStatus.title || "Schedule")
   readonly property string periodView: String(setting("calendarView", "Day")).toLowerCase() === "week"
     ? "week" : "day"
+  readonly property string weekLayout: setting("weekLayout", "List") === "Calendar" ? "calendar" : "list"
+  readonly property bool showCanvasCalendar: setting("showCanvasCalendar", "Off") === "On"
+  property var canvasCalendarEvents: []
+  property int canvasConfigGeneration: 0
+  property bool canvasCalendarQueued: false
+  property int idleTicks: 0
   property var canvasStatus: ({ configured: false, assignments: [], courses: {} })
 
   property string viewMode: "main"
@@ -174,7 +183,7 @@ Panel {
     var knownRevision = currentRevision()
     if (!isFinite(incomingRevision) || incomingRevision < knownRevision) return false
 
-    scheduleStatus = data
+    if (JSON.stringify(scheduleStatus) !== JSON.stringify(data)) scheduleStatus = data
     if (viewMode === "detail" && selectedActivityId !== ""
         && !activityInStatus(data, selectedActivityId)) {
       selectedActivityId = ""
@@ -276,6 +285,10 @@ Panel {
       setView(detailReturnMode)
     } else if (viewMode === "manage") {
       setView("main")
+    } else if (mainView.canvasView) {
+      mainView.canvasView = false
+    } else if (mainView.importOpen) {
+      mainView.importOpen = false
     } else {
       close()
     }
@@ -289,18 +302,32 @@ Panel {
     statusGeneration += 1
     statusProc.requestStatusGeneration = statusGeneration
     statusProc.requestLanguageRevision = languageRevision
-    statusProc.command = backendCommand(["status", "--days", "120"])
+    statusProc.command = backendCommand(["status", "--days", "7"])
     statusProc.running = true
   }
 
   function refreshCanvas(force) {
+    if (showCanvasCalendar) refreshCanvasCalendar(force)
     if (canvasProc.running) {
       if (force) canvasRefreshQueued = true
       return
     }
+    canvasProc.generation = canvasConfigGeneration
     canvasProc.command = ["python3", canvasPath].concat(force ? ["--refresh"] : [])
     canvasProc.running = true
   }
+
+  function refreshCanvasCalendar(force) {
+    if (canvasCalendarProc.running) {
+      if (force) canvasCalendarQueued = true
+      return
+    }
+    canvasCalendarProc.generation = canvasConfigGeneration
+    canvasCalendarProc.command = ["python3", canvasPath, "--academic", "calendar"].concat(force ? ["--refresh"] : [])
+    canvasCalendarProc.running = true
+  }
+
+  onShowCanvasCalendarChanged: if (componentReady && showCanvasCalendar) refreshCanvasCalendar(false)
 
   function refreshCanvasSettings() {
     if (canvasSettingsProc.running) return
@@ -348,6 +375,7 @@ Panel {
 
   function chooseCsv() {
     if (busy) return
+    mainView.importOpen = true
     notice = I18n.t(languageCode, "notice.openingPicker")
     noticeIsError = false
     chooserProc.requestLanguageRevision = languageRevision
@@ -527,6 +555,27 @@ Panel {
     controller.hide()
   }
 
+  function openDesktopActivity(activityId) {
+    open()
+    mainView.canvasView = false
+    if (activityById(activityId)) openActivity(activityId, "main")
+    else {
+      notice = I18n.t(languageCode, "notice.activityMissing")
+      noticeIsError = true
+    }
+  }
+
+  function openDesktopCalendar() {
+    open()
+    mainView.canvasView = false
+    persistSettings({ calendarView: "Week", weekLayout: "Calendar" })
+  }
+
+  function openDesktopAcademic() {
+    open()
+    mainView.canvasView = true
+  }
+
   function toggle() {
     if (opened) close()
     else open()
@@ -546,12 +595,30 @@ Panel {
     checkReminders()
   })
 
+  FileView {
+    path: root.scheduleStatePath
+    preload: false
+    watchChanges: true
+    printErrors: false
+    onFileChanged: if (root.componentReady) scheduleChangedTimer.restart()
+  }
+
+  Timer {
+    id: scheduleChangedTimer
+    interval: 200
+    onTriggered: root.refresh()
+  }
+
   Timer {
     interval: 30000
     repeat: true
     running: true
     onTriggered: {
-      root.refresh()
+      root.idleTicks += 1
+      // Visible views update their clocks locally. Re-expand only on file
+      // changes, day rollover, explicit refresh, or this five-minute fallback.
+      if (root.idleTicks % 10 === 0 || root.scheduleStatus.referenceDate !== root.todayIso())
+        root.refresh()
       root.checkReminders()
     }
   }
@@ -564,11 +631,26 @@ Panel {
   }
 
   Process {
+    id: canvasCalendarProc
+    property int generation: 0
+    stdout: StdioCollector { id: canvasCalendarOut; waitForEnd: true }
+    onExited: {
+      var result = root.parsedOutput(canvasCalendarOut.text)
+      if (result && result.ok && generation === root.canvasConfigGeneration) root.canvasCalendarEvents = result.items || []
+      if (root.canvasCalendarQueued) {
+        root.canvasCalendarQueued = false
+        Qt.callLater(function() { root.refreshCanvasCalendar(true) })
+      }
+    }
+  }
+
+  Process {
     id: canvasProc
+    property int generation: 0
     stdout: StdioCollector { id: canvasOut; waitForEnd: true }
     onExited: function(exitCode) {
       var result = root.parsedOutput(canvasOut.text)
-      if (exitCode === 0 && result && result.assignments)
+      if (exitCode === 0 && result && result.assignments && generation === root.canvasConfigGeneration)
         root.canvasStatus = result
       if (root.canvasRefreshQueued) {
         root.canvasRefreshQueued = false
@@ -600,6 +682,9 @@ Panel {
       mainView.canvasSaving = false
       var result = root.parsedOutput(canvasConfigureOut.text)
       if (exitCode === 0 && result && result.ok === true) {
+        root.canvasConfigGeneration += 1
+        root.canvasCalendarEvents = []
+        root.canvasStatus = ({ configured: true, assignments: [], courses: {} })
         mainView.canvasBaseUrl = String(result.baseUrl || "")
         mainView.canvasHasToken = true
         mainView.canvasSetupOpen = false
@@ -814,7 +899,7 @@ Panel {
     }
   }
 
-  KeyboardPanel {
+  AnimatedKeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
     owner: root.barIdentity
@@ -822,7 +907,8 @@ Panel {
     open: root.opened
     centerOnBar: false
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(480))
+    contentWidth: panel.fittedContentWidth(Style.space(root.viewMode === "main"
+      ? mainView.calendarVisible ? 760 : mainView.canvasView ? 620 : 480 : 480))
     contentHeight: panel.fittedContentHeight(Style.space(680))
 
     PanelKeyCatcher {
@@ -849,6 +935,10 @@ Panel {
         desktopEnabled: root.setting("desktopWidget", "Off") === "On"
         languageCode: root.languageCode
         periodView: root.periodView
+        weekLayout: root.weekLayout
+        showCanvasCalendar: root.showCanvasCalendar
+        canvasCalendarEvents: root.canvasCalendarEvents
+        panelOpen: panel.visible && root.viewMode === "main"
         previewData: root.previewData
         notice: root.notice
         noticeIsError: root.noticeIsError
@@ -862,6 +952,8 @@ Panel {
         onAddRequested: root.startCreate("main")
         onManageRequested: root.showManage()
         onPeriodViewRequested: function(value) { root.setPeriodView(value) }
+        onWeekLayoutRequested: function(value) { root.persistSettings({ weekLayout: value === "calendar" ? "Calendar" : "List" }) }
+        onCanvasCalendarToggleRequested: root.persistSettings({ showCanvasCalendar: root.showCanvasCalendar ? "Off" : "On" })
         onActivityRequested: function(activityId) { root.openActivity(activityId, "main") }
         onChooseRequested: root.chooseCsv()
         onPreviewRequested: root.previewCsv()
@@ -879,7 +971,7 @@ Panel {
       ActivityManager {
         id: activityManager
         anchors.fill: parent
-        visible: root.viewMode === "manage"
+        visible: panel.visible && root.viewMode === "manage"
         items: root.scheduleStatus.items || []
         languageCode: root.languageCode
         scheduleTitle: root.scheduleTitle
@@ -940,7 +1032,7 @@ Panel {
           : I18n.t(root.languageCode, "dialog.deleteFallback")
         cancelText: I18n.t(root.languageCode, "common.cancel")
         confirmText: I18n.t(root.languageCode, "common.delete")
-        background: Color.popups.background
+        background: Commons.Color.popups.background
         foreground: root.contentForeground
         fontFamily: root.contentFontFamily
         onCanceled: root.cancelDelete()

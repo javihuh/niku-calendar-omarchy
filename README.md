@@ -2,7 +2,8 @@
 
 An independent Omarchy bar plugin for creating and editing recurring activities,
 opening class notes and links, importing CSV schedules, receiving reminders,
-and optionally viewing Canvas assignments and a desktop glance widget.
+with daily/weekly calendar views, an optional Canvas academic panel, and an
+interactive desktop widget.
 It does not replace or modify the built-in clock or other calendar widgets.
 
 > Keep your plans close and your paws ready. (=^･ω･^=)
@@ -16,6 +17,9 @@ It does not replace or modify the built-in clock or other calendar widgets.
 - Editable schedule title that persists independently of its activities.
 - Create, inspect, edit, and delete activities directly from the bar.
 - Switch between a remembered daily view and a Monday-to-Sunday weekly view.
+- Choose a weekly list or a compact hourly calendar, with overlapping activities
+  arranged side by side, a current-time line, and clickable activity blocks.
+- Labeled view controls; CSV import is tucked behind the upload icon.
 - Distinct upcoming, `IN PROGRESS`, and `OCCURRED` activity states.
 - A localized daily encouragement with a rotating cat kaomoji on busy days.
 - Per-activity plain-text notes and multiple labeled HTTP(S) links, with an
@@ -30,7 +34,11 @@ It does not replace or modify the built-in clock or other calendar widgets.
 - Spanish and English column aliases.
 - UTF-8 and Latin-1 input support.
 - Optional, read-only Canvas connection with a private offline cache.
+- Canvas academic panel: assignments, announcements, courses, published grades,
+  course materials, and optional deadlines/events in the weekly calendar.
 - Desktop widget on workspace 1 of the primary monitor, disabled by default.
+- Desktop activity progress, next-day activities, priority deadlines, clickable
+  cards, a weekly workload strip, and remembered compact/expanded layouts.
 - No third-party Python packages.
 
 ## Requirements
@@ -58,11 +66,17 @@ The widget defaults to the right section of the bar. Move it if desired:
 omarchy bar move io.github.javihuh.schedule --section center
 ```
 
-Update an installed copy with:
+## Update
+
+Update an installed copy to the latest version with one command:
 
 ```bash
-omarchy plugin update io.github.javihuh.schedule
+omarchy plugin update io.github.javihuh.schedule --yes
 ```
+
+Omarchy downloads the latest `main`, validates the plugin, and reloads it.
+Your schedule, Canvas connection, and saved preferences are stored separately
+and retained. See [what is new in v0.6.0](CHANGELOG.md).
 
 ## CSV Format
 
@@ -103,24 +117,63 @@ contain that date. Use `last` to run an activity on every month's final day.
 1. Click the calendar icon in the Omarchy bar.
 2. Choose **Add activity** to create an activity manually.
 3. Use **Manage activities** to inspect, edit, or delete complete recurring series.
-4. Switch between **Day** and **Week** for local activities. The weekly view
-   covers Monday through Sunday and groups activities by day. Open **Canvas**
-   for upcoming deliveries with their local due date, time and time remaining.
+4. Switch between **Day** and **Week**. In Week, choose **List** or **Calendar**
+   under Layout. The calendar covers Monday through Sunday with hours down the
+   side, and scrolls vertically. Its panel grows only to 760 logical pixels wide
+   (subject to theme scaling and available screen space), keeping the normal height.
+   Both the period and layout are remembered.
 5. Select an activity occurrence to open its notes, links, and editing actions.
 6. Use the pencil beside the heading to rename the schedule.
 7. Optionally enable the desktop widget with the small eye icon at the top left
    of the panel. It appears only when
    the primary monitor displays workspace 1 and hides on other workspaces.
-   Click and drag the card to move it; its position is saved in
-   `~/.local/state/omarchy/niku-desktop.json` and restored after a restart.
+    Click and drag the header to move it; its position is saved in
+    `~/.local/state/omarchy/niku-desktop.json` and restored after a restart.
+
+### Desktop summary
+
+Use the eye icon in Niku's header to show the desktop widget. It offers:
+
+- **In progress / Free time:** the current activity's progress and time left;
+  when free, the next activity and its countdown, including tomorrow and later
+  dates within the loaded schedule horizon.
+- **Up next:** the following activities, with dates and times. Select any
+  activity card to open its notes, links, and editing actions in Niku.
+- **Priority deadlines:** unsubmitted work due today, overdue work, tomorrow's
+  deadlines, then later work. Each card shows its course and deadline; select
+  it to open Canvas. Planner completion is distinct from submitting work, and
+  missing work is retained even if Canvas has assigned it a grade.
+- **Your week:** Monday-to-Sunday activity counts and relative workload bars
+  based on scheduled minutes. A dot marks a day with a pending Canvas deadline.
+  Select a day to open the weekly calendar.
+- **Compact / Expand:** switch between the current/next activity plus one
+  priority deadline, or the full daily/weekly summary. The preference survives
+  shell restarts. The header stays available when a tall summary needs scrolling.
+
+Only the header drags the widget; clicking its content does not move it. The
+widget stays within the screen bounds, keeps its saved position, follows the
+theme and language, and unloads its visual content while hidden on another
+workspace. Its clock also stops while hidden. Activity timestamps are prepared
+once per data change; unchanged deadline cards are reused across clock ticks.
+The weekly summary is recalculated only when its data or calendar day changes,
+and is not calculated in compact mode.
+Deadlines use the available Canvas snapshot (including the planner's recent
+overdue window); an offline indicator identifies cached results.
+
+You can also select the desktop layout from the terminal:
+
+```bash
+omarchy bar set io.github.javihuh.schedule desktopLayout Compact
+omarchy bar set io.github.javihuh.schedule desktopLayout Expanded
+```
 
 ### Canvas (optional)
 
-Canvas is read-only and does not write to `schedule.json`. Open the **Canvas**
-tab, enter the address of your Canvas site and paste your personal access
+Canvas is read-only and does not write to `schedule.json`. Open **Canvas**
+in the header, enter the address of your Canvas site and paste your personal access
 token into the hidden field, then select **Save and sync**. The setup form
 appears automatically when there is no saved token; use the gear icon in that
-tab to change the address or token later. Leaving the token field empty keeps
+panel to change the address or token later. Leaving the token field empty keeps
 the existing token. Niku saves new tokens to
 `~/.config/niku/canvas-token` (permissions `0600`) and configuration to
 `~/.config/niku/canvas.json` (permissions `0600`). Existing token files
@@ -143,6 +196,30 @@ to sync immediately. It reads active courses and planner assignments, ignores
 completed deliveries, and shows deadlines in local time. Not all Canvas items
 have due dates, so undated items are not shown. Canvas may also impose
 restrictions on which courses and assignments your token can read.
+
+The academic panel has these sections:
+
+- **Assignments:** filter by course and pending, overdue, submitted, or all.
+  Course assignment data includes undated work and actual submission state;
+  marking something complete in the planner is not treated as submitting it.
+- **Announcements:** recent course notices. Select a notice to expand its
+  plain-text content, or use its external-link button to read it in Canvas.
+- **Courses:** choose a course to see its assignments, or open it in Canvas.
+- **Grades:** choose a course for published assignment grades and the current
+  average supplied by Canvas. Missing grades are shown as unpublished; Niku
+  does not invent or recompute the course's grading scheme.
+- **Materials:** choose a course for module items, pages, links, and available
+  files. Links open in the browser; Niku does not automatically download files.
+- **Calendar:** return to Niku's weekly grid with the Canvas overlay enabled.
+  Deadlines use diamond markers; timed events use blocks and all-day events
+  have their own scrollable strip above the hours.
+
+Academic resources load when requested, with independent private caches per
+section, course, and account in `~/.cache/niku/academic/`. Saved data appears
+first while stale data is refreshed in the background. Synchronization times,
+offline results, and partial failures are shown in the panel. An inaccessible
+course does not prevent the remaining courses from being listed. Use the
+refresh button to request fresh data for the current section.
 
 The cache is `~/.cache/niku/canvas.json` and is used offline; it contains
 course and assignment names, dates and links, but never the token. Remove the
@@ -192,7 +269,7 @@ translated automatically.
 
 ### Importing CSV
 
-1. Select a `.csv` file or enter its path in the import section.
+1. Open the upload icon in the header, then select a `.csv` file or enter its path.
 2. Choose **Preview CSV**.
 3. Correct any reported row errors.
 4. Choose **Import and replace activities**.
@@ -206,6 +283,17 @@ The plugin checks for upcoming activities every 30 seconds while the Omarchy
 shell is running. A native notification containing the activity name, time, and
 location is sent during the ten-minute window before it starts. Notifications
 use normal urgency and respect Do Not Disturb.
+
+Schedule snapshots now expand seven days ahead plus the current week, instead
+of generating 120 days on every refresh. Identical snapshots reuse the current
+model, and hidden activity lists are not instantiated. File changes trigger a
+debounced refresh; periodic snapshot polling runs only every five minutes,
+with a separate day-rollover check. Opening the panel and explicit refreshes
+also update the snapshot. Visible views maintain their own clocks instead of
+spawning a helper for each tick; reminder checks still run every 30 seconds.
+
+See [desktop performance measurements](docs/performance.md) for the isolated
+before/after CPU and memory results and their test conditions.
 
 ## Local Data
 
@@ -254,8 +342,7 @@ Validate the manifest and run the tests:
 
 ```bash
 omarchy plugin validate .
-qmllint -I /usr/share/omarchy/shell *.qml
-qmltestrunner -input tests
+/usr/lib/qt6/bin/qmltestrunner -platform offscreen -input tests
 python3 -m unittest discover -s tests -v
 ```
 
@@ -267,6 +354,9 @@ python3 schedule.py import examples/schedule.csv
 python3 schedule.py status
 python3 schedule.py remind
 python3 canvas.py
+python3 canvas.py --academic courses
+python3 canvas.py --academic assignments --course 123
+python3 canvas.py --academic grades --course 123 --cached
 ```
 
 Backend messages default to English. Pass `--language es` before the command
@@ -279,6 +369,10 @@ python3 schedule.py --language es preview examples/schedule.csv
 Mutation commands (`rename-schedule`, `create-activity`, `update-activity`, and
 `delete-activity`) accept one JSON object on standard input. They use the saved
 revision to reject stale edits and are primarily consumed by the QML panel.
+
+The `status` helper defaults to a seven-day horizon; pass `--days 120` explicitly
+when a longer expansion is needed. Academic helper tests use mocked responses
+and temporary configuration/cache directories, never real tokens or network calls.
 
 Planned import adapters include spreadsheets, iCalendar, PDF, images, and OCR.
 CSV is intentionally the first format because it is deterministic and can be
